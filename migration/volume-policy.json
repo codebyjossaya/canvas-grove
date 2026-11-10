@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "volumes": [
+    {
+      "composeName": "postgres_data",
+      "transfer": "logical-backup-only",
+      "required": true,
+      "reason": "Use encrypted pg_dump/pg_restore instead of copying a live PostgreSQL data directory across hosts or architectures."
+    },
+    {
+      "composeName": "browser_profiles",
+      "transfer": "do-not-transfer",
+      "required": false,
+      "reason": "Browser runtime profiles are host-local. Durable authentication state is envelope-encrypted in PostgreSQL."
+    },
+    {
+      "composeName": "browser_orchestrator_state",
+      "transfer": "do-not-transfer",
+      "required": false,
+      "reason": "The registry contains source-host container references. The target must start with an empty registry and recreate runtimes from encrypted database state."
+    }
+  ]
+}

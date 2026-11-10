@@ -1,0 +1,46 @@
+{
+  "name": "my-clerk-next-app",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
+    "db:check": "drizzle-kit check",
+    "sync:worker": "tsx scripts/sync-worker.ts",
+    "session:health": "tsx scripts/session-health-report.ts",
+    "migration:preflight": "node scripts/migration/preflight.mjs",
+    "migration:manifest": "node scripts/migration/package-manifest.mjs",
+    "test:bridge": "tsx --test tests/bridge-errors.test.ts tests/display.test.ts",
+    "test:e2e": "playwright test",
+    "test:acceptance": "playwright test e2e/acceptance.spec.ts"
+  },
+  "dependencies": {
+    "@browserbasehq/sdk": "^2.25.0",
+    "@clerk/nextjs": "^7.9.25",
+    "drizzle-orm": "^0.45.4",
+    "next": "16.4.5",
+    "playwright-core": "^1.65.0",
+    "postgres": "^4.1.0",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "server-only": "^0.0.1"
+  },
+  "devDependencies": {
+    "@clerk/testing": "^2.2.55",
+    "@playwright/test": "^1.65.0",
+    "@tailwindcss/turbopack": "^4",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "drizzle-kit": "^0.31.11",
+    "eslint": "^9",
+    "eslint-config-next": "16.4.5",
+    "tailwindcss": "^4",
+    "tsx": "^4.23.15",
+    "typescript": "^5"
+  }
+}

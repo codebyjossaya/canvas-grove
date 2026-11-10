@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "required": [
+    { "name": "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY", "secret": false, "purpose": "Clerk frontend application identifier; must remain paired with CLERK_SECRET_KEY" },
+    { "name": "CLERK_SECRET_KEY", "secret": true, "purpose": "Clerk server authentication" },
+    { "name": "POSTGRES_DB", "secret": false, "purpose": "PostgreSQL database name" },
+    { "name": "POSTGRES_ADMIN_USER", "secret": false, "purpose": "PostgreSQL administrative role name" },
+    { "name": "POSTGRES_ADMIN_PASSWORD", "secret": true, "purpose": "PostgreSQL administrative role password" },
+    { "name": "APP_DATABASE_USER", "secret": false, "purpose": "RLS-constrained application role name" },
+    { "name": "APP_DATABASE_PASSWORD", "secret": true, "purpose": "Application database role password" },
+    { "name": "BROWSER_ORCHESTRATOR_SECRET", "secret": true, "purpose": "HMAC authentication between app, worker, and orchestrator" },
+    { "name": "BROWSER_STATE_KEK", "secret": true, "purpose": "Key-encryption key required to restore encrypted Canvas browser state" },
+    { "name": "BROWSER_STATE_KEK_ID", "secret": false, "purpose": "Identifier for the browser-state key version" },
+    { "name": "BROWSER_PUBLIC_BASE_URL", "secret": false, "purpose": "HTTPS base URL used for temporary viewer links" }
+  ],
+  "runtimeDefaults": [
+    "LAN_PORT",
+    "DOCKER_SOCKET_GID",
+    "BROWSER_IDLE_TTL_SECONDS",
+    "SYNC_WORKER_CONCURRENCY",
+    "SYNC_WORKER_POLL_MS"
+  ],
+  "neverBundle": [
+    ".env",
+    ".env.local",
+    ".env.docker",
+    ".clerk/",
+    "*.pem",
+    "*.key",
+    "*.agekey",
+    "browser cookies",
+    "live-view grants",
+    "CDP URLs"
+  ]
+}

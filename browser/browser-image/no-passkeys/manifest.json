@@ -1,0 +1,17 @@
+{
+  "manifest_version": 3,
+  "name": "Canvas Grove hosted browser: no passkeys",
+  "version": "1.0.0",
+  "description": "Rejects WebAuthn (passkey / security key) requests so no OS or browser passkey dialog can appear in the hosted sign-in browser.",
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["no-passkeys.js"],
+      "run_at": "document_start",
+      "all_frames": true,
+      "match_about_blank": true,
+      "match_origin_as_fallback": true,
+      "world": "MAIN"
+    }
+  ]
+}

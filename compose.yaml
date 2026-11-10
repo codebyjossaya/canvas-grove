@@ -1,0 +1,235 @@
+name: canvas-grove
+
+x-database-environment: &database-environment
+  DATABASE_URL: postgresql://${APP_DATABASE_USER:?Set APP_DATABASE_USER}:${APP_DATABASE_PASSWORD:?Set APP_DATABASE_PASSWORD}@postgres:5432/${POSTGRES_DB:?Set POSTGRES_DB}
+
+services:
+  postgres:
+    image: postgres:17.6-bookworm
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?Set POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_ADMIN_USER:?Set POSTGRES_ADMIN_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_ADMIN_PASSWORD:?Set POSTGRES_ADMIN_PASSWORD}
+      APP_DATABASE_USER: ${APP_DATABASE_USER:?Set APP_DATABASE_USER}
+      APP_DATABASE_PASSWORD: ${APP_DATABASE_PASSWORD:?Set APP_DATABASE_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    networks: [backend]
+    security_opt: ["no-new-privileges:true"]
+
+  migrate:
+    build:
+      context: .
+      target: builder
+      args:
+        NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY:?Set NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY}
+    command: ["npm", "run", "db:migrate"]
+    environment:
+      <<: *database-environment
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [backend]
+    restart: "no"
+    security_opt: ["no-new-privileges:true"]
+
+  browser-image:
+    image: canvas-browser:local
+    build:
+      context: ./browser/browser-image
+    entrypoint: ["/bin/true"]
+    restart: "no"
+    networks: [browser-egress]
+
+  browser-orchestrator:
+    build:
+      context: ./services/browser-orchestrator
+    restart: unless-stopped
+    environment:
+      PORT: "8080"
+      BROWSER_ORCHESTRATOR_SECRET: ${BROWSER_ORCHESTRATOR_SECRET:?Set BROWSER_ORCHESTRATOR_SECRET}
+      BROWSER_PUBLIC_BASE_URL: ${BROWSER_PUBLIC_BASE_URL:?Set BROWSER_PUBLIC_BASE_URL to the exact external HTTPS origin}
+      BROWSER_IMAGE: canvas-browser:local
+      BROWSER_NETWORK: canvas-browser-quarantine
+      BROWSER_RELAY_URL: http://browser-relay:8081
+      BROWSER_RELAY_SECRET: ${BROWSER_RELAY_CONTROL_SECRET:?Set BROWSER_RELAY_CONTROL_SECRET}
+      BROWSER_IDLE_TTL_SECONDS: ${BROWSER_IDLE_TTL_SECONDS:-1800}
+      BROWSER_REGISTRY_PATH: /var/lib/canvas-grove/state/registry.json
+    volumes:
+      - browser_profiles:/var/lib/canvas-grove/browser-profiles
+      - browser_orchestrator_state:/var/lib/canvas-grove/state
+      - /var/run/docker.sock:/var/run/docker.sock
+    # The orchestrator stays non-root; this supplementary group is limited to
+    # the Docker socket's group on the host (0 on Docker Desktop).
+    group_add:
+      - "${DOCKER_SOCKET_GID:-0}"
+    tmpfs:
+      - /tmp:size=1g,mode=1777
+    shm_size: 1gb
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    depends_on:
+      browser-image:
+        condition: service_completed_successfully
+      browser-relay:
+        condition: service_healthy
+    networks: [backend, browser-control]
+    security_opt: ["no-new-privileges:true"]
+
+  browser-relay:
+    container_name: canvas-browser-relay
+    build:
+      context: .
+      dockerfile: services/browser-relay/Dockerfile
+    restart: unless-stopped
+    environment:
+      PORT: "8081"
+      BROWSER_RELAY_CONTROL_SECRET: ${BROWSER_RELAY_CONTROL_SECRET:?Set BROWSER_RELAY_CONTROL_SECRET}
+      BROWSER_EGRESS_REGISTRATION_SECRET: ${BROWSER_EGRESS_REGISTRATION_SECRET:?Set BROWSER_EGRESS_REGISTRATION_SECRET}
+      BROWSER_ORCHESTRATOR_CONTROL_URL: http://browser-orchestrator:8080
+      # Dynamic per-session attachments expose the fixed container name, not
+      # Compose's alias from the proxy's static uplink network.
+      BROWSER_EGRESS_PROXY_CONTROL_URL: http://canvas-browser-egress-proxy:3128
+      BROWSER_PUBLIC_ORIGIN: ${BROWSER_PUBLIC_BASE_URL:?Set BROWSER_PUBLIC_BASE_URL to the exact external HTTPS origin}
+      BROWSER_CONTROL_ORIGIN: http://browser-orchestrator:8080
+    depends_on:
+      browser-egress-proxy:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8081/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    networks: [browser-control]
+    read_only: true
+    tmpfs: ["/tmp:size=32m,mode=1777"]
+    cap_drop: [ALL]
+    pids_limit: 128
+    mem_limit: 256m
+    security_opt: ["no-new-privileges:true"]
+
+  browser-egress-proxy:
+    container_name: canvas-browser-egress-proxy
+    build:
+      context: .
+      dockerfile: services/browser-egress-proxy/Dockerfile
+    restart: unless-stopped
+    environment:
+      PORT: "3128"
+      BROWSER_EGRESS_REGISTRATION_SECRET: ${BROWSER_EGRESS_REGISTRATION_SECRET:?Set BROWSER_EGRESS_REGISTRATION_SECRET}
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3128/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    networks: [egress-uplink]
+    read_only: true
+    tmpfs: ["/tmp:size=32m,mode=1777"]
+    cap_drop: [ALL]
+    pids_limit: 128
+    mem_limit: 256m
+    security_opt: ["no-new-privileges:true"]
+
+  app:
+    build:
+      context: .
+      target: runner
+      args:
+        NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY:?Set NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY}
+    restart: unless-stopped
+    environment:
+      <<: *database-environment
+      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY:?Set NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY}
+      CLERK_SECRET_KEY: ${CLERK_SECRET_KEY:?Set CLERK_SECRET_KEY}
+      HOSTED_BROWSER_PROVIDER: self-hosted
+      BROWSER_ORCHESTRATOR_URL: http://browser-orchestrator:8080
+      BROWSER_ORCHESTRATOR_SECRET: ${BROWSER_ORCHESTRATOR_SECRET:?Set BROWSER_ORCHESTRATOR_SECRET}
+      BROWSER_STATE_KEK: ${BROWSER_STATE_KEK:?Set BROWSER_STATE_KEK}
+      BROWSER_STATE_KEK_ID: ${BROWSER_STATE_KEK_ID:-local-v1}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      browser-orchestrator:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/').then(r=>{if(r.status>=500)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 8
+      start_period: 20s
+    networks: [backend]
+    security_opt: ["no-new-privileges:true"]
+
+  lan-gateway:
+    image: nginx:1.29.3-alpine
+    restart: unless-stopped
+    ports:
+      - "0.0.0.0:${LAN_PORT:-3000}:8080"
+    volumes:
+      - ./docker/lan-gateway/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      app:
+        condition: service_healthy
+      browser-orchestrator:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8080/"]
+      interval: 15s
+      timeout: 5s
+      retries: 8
+      start_period: 10s
+    networks: [backend]
+    security_opt: ["no-new-privileges:true"]
+
+  sync-worker:
+    build:
+      context: .
+      target: sync-worker
+    restart: unless-stopped
+    environment:
+      <<: *database-environment
+      HOSTED_BROWSER_PROVIDER: self-hosted
+      BROWSER_ORCHESTRATOR_URL: http://browser-orchestrator:8080
+      BROWSER_ORCHESTRATOR_SECRET: ${BROWSER_ORCHESTRATOR_SECRET:?Set BROWSER_ORCHESTRATOR_SECRET}
+      BROWSER_STATE_KEK: ${BROWSER_STATE_KEK:?Set BROWSER_STATE_KEK}
+      BROWSER_STATE_KEK_ID: ${BROWSER_STATE_KEK_ID:-local-v1}
+      SYNC_WORKER_CONCURRENCY: ${SYNC_WORKER_CONCURRENCY:-4}
+      SYNC_WORKER_POLL_MS: ${SYNC_WORKER_POLL_MS:-3000}
+      CANVAS_KEEPALIVE_MINUTES: ${CANVAS_KEEPALIVE_MINUTES:-10}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      browser-orchestrator:
+        condition: service_healthy
+    networks: [backend]
+    security_opt: ["no-new-privileges:true"]
+
+volumes:
+  postgres_data:
+  browser_profiles:
+  browser_orchestrator_state:
+
+networks:
+  backend:
+    driver: bridge
+  browser-egress:
+    name: canvas-browser-quarantine
+    driver: bridge
+    internal: true
+  browser-control:
+    driver: bridge
+    internal: true
+  egress-uplink:
+    driver: bridge

@@ -1,0 +1,80 @@
+.countdown {
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--s1);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px 12px;
+  color: var(--text);
+}
+
+.countdown[data-surface="popup"] {
+  max-width: min(520px, calc(100vw - 40px));
+  border-color: var(--sidebar-border);
+  background: var(--viewer-surface);
+  color: var(--viewer-text);
+}
+
+/* Compact, single-line timer for the secure-browser header. Urgency shows as
+   color only (the accessible label still announces it), so the frame stays quiet. */
+.countdown[data-surface="header"] {
+  padding: 4px 9px;
+  border-color: var(--sidebar-border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--viewer-muted);
+  display: inline-flex;
+  gap: 6px;
+}
+.countdown[data-surface="header"] .label { font-size: 10px; font-weight: 600; }
+.countdown[data-surface="header"] .time { min-width: 0; font-size: 12px; color: var(--viewer-text); }
+.countdown[data-surface="header"] .hint { display: none; }
+
+.countdown[data-urgency="warning"] {
+  border-color: var(--status-warning-border, #c69235);
+  background: var(--status-warning-soft, #fff7e4);
+}
+
+.countdown[data-urgency="urgent"],
+.countdown[data-urgency="expired"] {
+  border-color: var(--status-danger-border, #c96b61);
+  background: var(--status-danger-soft, #fff0ee);
+}
+
+.label {
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.time {
+  min-width: 4.6ch;
+  text-align: right;
+  font: 750 15px/1.1 ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+.hint {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--text3);
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+[data-surface="popup"] .hint {
+  color: var(--viewer-muted);
+}
+
+@media (max-width: 420px) {
+  .countdown {
+    padding: 9px 10px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .countdown {
+    transition: none;
+  }
+}

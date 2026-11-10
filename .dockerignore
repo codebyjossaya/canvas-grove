@@ -1,0 +1,13 @@
+.git
+.next
+node_modules
+.env*
+!.env.example
+dev.*.log
+npm-debug.log*
+coverage
+backups
+test-results
+playwright-report
+e2e/.theme-test-results
+.docker-build-config

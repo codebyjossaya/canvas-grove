@@ -1,0 +1,15 @@
+{
+  "PasswordManagerEnabled": false,
+  "PasswordManagerPasskeysEnabled": false,
+  "PasswordLeakDetectionEnabled": false,
+  "PasswordSharingEnabled": false,
+  "AutofillAddressEnabled": false,
+  "AutofillCreditCardEnabled": false,
+  "PaymentMethodQueryEnabled": false,
+  "BrowserSignin": 0,
+  "SyncDisabled": true,
+  "TranslateEnabled": false,
+  "PromotionsEnabled": false,
+  "DefaultNotificationsSetting": 2,
+  "DefaultGeolocationSetting": 2
+}

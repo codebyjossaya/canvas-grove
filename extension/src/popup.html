@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=360">
+  <title>Grove for Canvas</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header class="top">
+    <span class="grove-mark" aria-hidden="true"><i></i><i></i><i></i></span>
+    <strong class="title">Grove for Canvas</strong>
+    <span id="top-chip" class="chip" hidden></span>
+  </header>
+
+  <main id="root" aria-live="polite">
+    <section data-view="loading" aria-label="Loading">
+      <div class="skeleton wide"></div><div class="skeleton"></div><div class="skeleton short"></div>
+    </section>
+
+    <section data-view="disconnected" hidden>
+      <h1>Connect to Canvas Grove</h1>
+      <p>Open Canvas links from Grove with your Canvas session already in this browser, so Gradescope, MATLAB and New Quizzes work.</p>
+      <button id="connect" class="button primary large block" type="button">Connect to Canvas Grove</button>
+      <p class="hint">You will confirm on the Canvas Grove website. No password is entered here.</p>
+    </section>
+
+    <section data-view="revoked" hidden>
+      <h1>Browser disconnected</h1>
+      <p id="revoked-text">This browser is no longer connected to Canvas Grove. Connect it again to keep opening Canvas from Grove.</p>
+      <button id="reconnect" class="button primary large block" type="button">Reconnect</button>
+    </section>
+
+    <section data-view="offline" hidden>
+      <h1>Can’t reach Canvas Grove</h1>
+      <p>Check your connection and try again. Your browser is still connected.</p>
+      <button id="retry" class="button secondary large block" type="button">Try again</button>
+    </section>
+
+    <section data-view="connected" hidden>
+      <dl class="rows">
+        <div><dt>Browser</dt><dd id="device"></dd></div>
+        <div><dt>Canvas site</dt><dd id="host"></dd></div>
+        <div><dt>Signed in here</dt><dd><span id="chip-browser" class="chip"></span></dd></div>
+        <div><dt>Grove’s Canvas</dt><dd><span id="chip-grove" class="chip"></span></dd></div>
+      </dl>
+      <p id="note" class="note" hidden></p>
+      <div class="actions">
+        <button id="open-canvas" class="button primary large block" type="button">Open Canvas</button>
+        <button id="grant" class="button primary large block" type="button" hidden>Allow access to Canvas</button>
+        <button id="open-grove" class="button secondary large block" type="button">Open Canvas Grove</button>
+      </div>
+      <p class="hint">Shift-click a Canvas link in Grove to refresh this browser’s Canvas session.</p>
+      <footer><button id="disconnect" class="danger-button" type="button">Disconnect this browser</button></footer>
+    </section>
+  </main>
+  <script type="module" src="popup.js"></script>
+</body>
+</html>

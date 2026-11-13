@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { hasLiveSession, normalizeOrigin, sameOrigin, toChromeCookie } from "../extension/cookies.js";
+import { hasLiveSession, normalizeOrigin, sameOrigin, toChromeCookie } from "../extension/src/cookies.js";
 
 const ORIGIN = "https://ufl.instructure.com";
 const NOW = 1_800_000_000;

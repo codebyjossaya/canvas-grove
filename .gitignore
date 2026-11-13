@@ -66,3 +66,6 @@ next-env.d.ts
 .canvas-mode
 *.bak
 *.bak-*
+
+# built extension
+/extension/dist/

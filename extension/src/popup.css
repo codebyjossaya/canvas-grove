@@ -1,0 +1,82 @@
+/* Canvas Grove tokens, copied from the app's theme.css (light + dark), so the popup matches the site. */
+@font-face{font-family:"Inter";font-style:normal;font-weight:100 900;font-display:block;src:url("fonts/inter-latin-var.woff2") format("woff2")}
+:root{
+  color-scheme:light;
+  --surface-page:#f6f6f7;--surface-raised:#ffffff;--surface-muted:#e9e9ec;--surface-hover:#f1f1f3;--surface-sunken:#f9f9fa;
+  --border-subtle:#e3e3e7;--border-strong:#cdcdd4;
+  --text-primary:#17171c;--text-secondary:#3d3d47;--text-muted:#5f5f6b;--text-faint:#8a8a96;
+  --accent-primary:#4b4fd6;--accent-primary-hover:#3f43c4;--accent-on-primary:#ffffff;--accent-soft:#ececfd;--accent-text:#4044c8;
+  --status-success:#1d6f3c;--status-success-soft:#e6f4eb;--status-warning:#87510a;--status-warning-soft:#fbf0dc;
+  --status-danger:#b02a1f;--status-danger-soft:#fdecea;--status-info:#2f55b0;--status-info-soft:#e9eefb;
+  --focus-ring:#4b4fd6;--skeleton-base:#ececef;--skeleton-shine:#f7f7f8;
+  --shadow-soft:0 1px 2px rgba(17,17,22,.05);--shadow-panel:0 1px 0 rgba(17,17,22,.03),0 0 0 1px rgba(17,17,22,.045);
+  --font-sans:"Inter",ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --radius-sm:6px;--radius-md:8px;--radius-lg:12px;--radius-full:999px;
+}
+@media (prefers-color-scheme:dark){:root{
+  color-scheme:dark;
+  --surface-page:#0e0e11;--surface-raised:#141418;--surface-muted:#222228;--surface-hover:#1c1c21;--surface-sunken:#111114;
+  --border-subtle:#26262d;--border-strong:#383841;
+  --text-primary:#ededf0;--text-secondary:#c3c3cb;--text-muted:#9a9aa6;--text-faint:#6f6f7b;
+  --accent-primary:#8e92ff;--accent-primary-hover:#a3a6ff;--accent-on-primary:#0e0e11;--accent-soft:#23244a;--accent-text:#a7aaff;
+  --status-success:#6fd394;--status-success-soft:#112a1b;--status-warning:#efc06a;--status-warning-soft:#2c2210;
+  --status-danger:#ff8f84;--status-danger-soft:#331715;--status-info:#9db8ff;--status-info-soft:#16203a;
+  --focus-ring:#a3a6ff;--skeleton-base:#1d1d22;--skeleton-shine:#26262d;
+  --shadow-soft:0 1px 2px rgba(0,0,0,.4);--shadow-panel:0 0 0 1px rgba(255,255,255,.055);
+}}
+
+*{box-sizing:border-box}
+html{width:360px;background:var(--surface-page)}
+body{width:360px;margin:0;padding:16px;background:var(--surface-page);color:var(--text-primary);font-family:var(--font-sans);font-size:14px;line-height:1.5;font-feature-settings:"cv11","ss03";-webkit-font-smoothing:antialiased;overflow-x:hidden}
+h1{margin:0 0 6px;font-size:17px;line-height:1.25;font-weight:650;letter-spacing:-.015em}
+p{margin:0 0 14px;color:var(--text-secondary);font-size:13px;overflow-wrap:anywhere}
+button{font:inherit;color:inherit;cursor:pointer}
+:focus-visible{outline:2px solid var(--focus-ring);outline-offset:2px}
+[hidden]{display:none !important}
+
+.top{display:flex;align-items:center;gap:8px;margin:0 0 16px;min-height:24px}
+.title{flex:1;min-width:0;font-size:14px;font-weight:650;letter-spacing:-.011em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+/* Grove mark, same construction as the website's sidebar brand. */
+.grove-mark{position:relative;width:20px;height:20px;flex:none;display:inline-block;border-radius:6px;background:var(--accent-primary)}
+.grove-mark i{position:absolute;width:6px;height:6px;border-radius:2px;background:var(--accent-on-primary)}
+.grove-mark i:nth-child(1){left:4px;top:4px}
+.grove-mark i:nth-child(2){right:4px;top:4px;opacity:.7}
+.grove-mark i:nth-child(3){left:4px;bottom:4px;opacity:.7}
+.grove-mark::after{content:"";position:absolute;right:4px;bottom:4px;width:6px;height:6px;border-radius:2px;background:var(--accent-on-primary);opacity:.4}
+
+.chip{display:inline-flex;align-items:center;height:20px;padding:0 8px;border-radius:var(--radius-full);background:var(--surface-muted);color:var(--text-secondary);font-size:11px;font-weight:600;white-space:nowrap;letter-spacing:.01em}
+.chip.success{background:var(--status-success-soft);color:var(--status-success)}
+.chip.warning{background:var(--status-warning-soft);color:var(--status-warning)}
+.chip.danger{background:var(--status-danger-soft);color:var(--status-danger)}
+.chip.info{background:var(--status-info-soft);color:var(--status-info)}
+
+.button{min-height:32px;padding:0 12px;border:1px solid transparent;border-radius:var(--radius-sm);display:inline-flex;align-items:center;justify-content:center;gap:6px;font-weight:550;font-size:13px;line-height:1.2;text-align:center;background:none;white-space:normal;min-width:0;overflow-wrap:anywhere;transition:background-color .12s,border-color .12s,transform .12s}
+.button.large{min-height:40px;padding:0 16px;font-size:14px}
+.button.block{width:100%}
+.button.primary{background:var(--accent-primary);color:var(--accent-on-primary);box-shadow:inset 0 1px 0 rgba(255,255,255,.12)}
+.button.primary:hover:not(:disabled){background:var(--accent-primary-hover)}
+.button.secondary{border-color:var(--border-strong);background:var(--surface-raised);color:var(--text-primary);box-shadow:var(--shadow-soft)}
+.button.secondary:hover:not(:disabled){background:var(--surface-hover)}
+.button:active:not(:disabled){transform:scale(.98)}
+.button:disabled{opacity:.6;cursor:default}
+.danger-button{border:0;background:none;padding:6px 0;color:var(--status-danger);font-weight:600;font-size:12px}
+.danger-button:hover{text-decoration:underline;text-underline-offset:3px}
+
+.rows{margin:0 0 14px;padding:4px 14px;border-radius:var(--radius-lg);background:var(--surface-raised);box-shadow:var(--shadow-panel)}
+.rows div{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:40px}
+.rows div + div{border-top:1px solid var(--border-subtle)}
+.rows dt{flex:none;color:var(--text-muted);font-size:12px;font-weight:600}
+.rows dd{margin:0;min-width:0;font-size:13px;font-weight:550;text-align:right;overflow-wrap:anywhere}
+
+.note{padding:10px 12px;border-radius:var(--radius-md);background:var(--status-warning-soft);color:var(--status-warning) !important;font-size:12px !important;font-weight:550}
+.note.info{background:var(--status-info-soft);color:var(--status-info) !important}
+.actions{display:grid;gap:8px;margin-bottom:12px}
+.hint{margin:12px 0 0;color:var(--text-muted);font-size:12px}
+.actions + .hint{margin:0 0 4px}
+footer{display:flex;justify-content:center;border-top:1px solid var(--border-subtle);margin-top:8px;padding-top:6px}
+
+.skeleton{height:14px;margin:0 0 10px;border-radius:6px;background:linear-gradient(90deg,var(--skeleton-base),var(--skeleton-shine),var(--skeleton-base));background-size:200% 100%;animation:shine 1.2s linear infinite}
+.skeleton.wide{height:22px;width:70%}.skeleton.short{width:45%}
+@keyframes shine{to{background-position:-200% 0}}
+@media (prefers-reduced-motion:reduce){.skeleton{animation:none}}

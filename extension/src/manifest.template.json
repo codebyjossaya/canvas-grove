@@ -1,0 +1,20 @@
+{
+  "manifest_version": 3,
+  "name": "Grove for Canvas",
+  "version": "0.2.0",
+  "description": "Opens Canvas links from Canvas Grove already signed in, so Gradescope, MATLAB and New Quizzes work in your own browser.",
+  "icons": { "16": "icons/16.png", "32": "icons/32.png", "48": "icons/48.png", "128": "icons/128.png" },
+  "permissions": ["cookies", "storage"],
+  "host_permissions": ["__GROVE_PATTERN__", "https://*.instructure.com/*"],
+  "optional_host_permissions": ["https://*/*"],
+  "background": { "service_worker": "background.js", "type": "module" },
+  "content_scripts": [
+    { "matches": ["__GROVE_PATTERN__"], "js": ["links.js"], "run_at": "document_idle" },
+    { "matches": ["__GROVE_CONNECT_PATTERN__"], "js": ["bridge.js"], "run_at": "document_start" }
+  ],
+  "action": {
+    "default_title": "Grove for Canvas",
+    "default_popup": "popup.html",
+    "default_icon": { "16": "icons/16.png", "32": "icons/32.png" }
+  }
+}

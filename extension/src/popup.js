@@ -33,6 +33,7 @@ function render(state) {
   note.className = "note";
   if (!state.canvasOrigin) { note.textContent = "Connect Canvas in Canvas Grove first, then reopen this."; note.hidden = false; }
   else if (state.needsAccess) { note.textContent = `Allow this extension to use ${host} so it can sign you in.`; note.className = "note info"; note.hidden = false; }
+  else if (state.lastIssue && !state.browserSignedIn) { note.textContent = state.lastIssue === "rejected" ? "Canvas did not accept the session Grove sent. Reconnect Canvas in Grove, then Shift-click a Canvas link." : "Could not sign this browser in to Canvas. Reconnect Canvas in Grove, then try again."; note.hidden = false; }
   else if (state.groveCanvas !== "connected") { note.textContent = "Canvas Grove’s Canvas sign-in has lapsed. Reconnect Canvas in Grove, then try again."; note.hidden = false; }
 
   $("open-canvas").hidden = !!state.needsAccess || !state.canvasOrigin;

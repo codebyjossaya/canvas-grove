@@ -1,5 +1,5 @@
 import { GROVE_ORIGIN } from "./config.js";
-import { SESSION_COOKIE_NAMES, hasLiveSession, sameOrigin, toChromeCookie } from "./cookies.js";
+import { sameOrigin, toChromeCookie } from "./cookies.js";
 
 const UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
 const TOKEN = new RegExp(`^gfe1\\.${UUID}\\.${UUID}\\.[A-Za-z0-9_-]{43}$`);
@@ -22,10 +22,25 @@ async function groveFetch(connection, path, init = {}) {
   return { response, body, revoked: false };
 }
 
-async function browserHasSession(canvasOrigin) {
+/**
+ * Is this browser actually signed in to Canvas? A cookie named canvas_session proves nothing:
+ * Canvas sets it for signed-out visitors too. Ask Canvas, as the browser, who the user is.
+ */
+async function browserSignedIn(canvasOrigin) {
   if (!(await hasAccess(canvasOrigin))) return false;
-  const cookies = (await Promise.all(SESSION_COOKIE_NAMES.map((name) => chrome.cookies.get({ url: canvasOrigin, name })))).filter(Boolean);
-  return hasLiveSession(cookies);
+  try {
+    const response = await fetch(`${canvasOrigin}/api/v1/users/self`, { credentials: "include", cache: "no-store", redirect: "manual", headers: { accept: "application/json" } });
+    return response.status === 200;
+  } catch { return false; }
+}
+
+/** Remember the last attempt so the popup and toolbar badge can say when Canvas refused the session. */
+async function recordResult(session) {
+  await chrome.storage.local.set({ lastResult: { ok: session.ok, reason: session.reason, at: Date.now() } });
+  try {
+    if (session.ok) { await chrome.action.setBadgeText({ text: "" }); }
+    else { await chrome.action.setBadgeBackgroundColor({ color: "#b02a1f" }); await chrome.action.setBadgeText({ text: "!" }); }
+  } catch { /* badge is best effort */ }
 }
 
 async function installCookies(canvasOrigin, cookies) {
@@ -42,17 +57,21 @@ async function installCookies(canvasOrigin, cookies) {
 async function ensureCanvasSession(connection, force) {
   const origin = connection.canvasOrigin;
   if (!origin || !connection.token || !(await hasAccess(origin))) return { ok: false, reason: "no-access" };
-  if (!force && (await browserHasSession(origin))) return { ok: true, reason: "already" };
+  if (!force && (await browserSignedIn(origin))) return { ok: true, reason: "already" };
   const { response, body, revoked } = await groveFetch(connection, "/api/extension/canvas-session", { method: "POST" });
   if (revoked) return { ok: false, reason: "revoked" };
   if (!response.ok || !body || body.canvasOrigin !== origin || !Array.isArray(body.cookies)) return { ok: false, reason: body?.code ?? "unavailable" };
-  return { ok: (await installCookies(origin, body.cookies)) > 0, reason: "installed" };
+  const installed = await installCookies(origin, body.cookies);
+  // Verify: the cookies only count if Canvas now recognises this browser.
+  const ok = installed > 0 && (await browserSignedIn(origin));
+  return { ok, reason: ok ? "installed" : installed > 0 ? "rejected" : "not-installed" };
 }
 
 async function openCanvas(url, force) {
   const connection = await loadConnection();
   if (!connection?.token || !connection.canvasOrigin || !sameOrigin(url, connection.canvasOrigin)) return { ok: false, reason: "not-connected" };
   const session = await ensureCanvasSession(connection, force);
+  await recordResult(session);
   await chrome.tabs.create({ url });
   return { ok: true, session: session.reason };
 }
@@ -72,7 +91,8 @@ async function popupState() {
   return {
     state: "connected", deviceName: status.body.deviceName ?? connection.deviceName, canvasOrigin,
     groveCanvas: status.body.canvasConnected ? "connected" : "expired",
-    needsAccess, browserSignedIn: canvasOrigin && !needsAccess ? await browserHasSession(canvasOrigin) : false,
+    needsAccess, browserSignedIn: canvasOrigin && !needsAccess ? await browserSignedIn(canvasOrigin) : false,
+    lastIssue: (await chrome.storage.local.get("lastResult")).lastResult?.ok === false ? (await chrome.storage.local.get("lastResult")).lastResult.reason : null,
   };
 }
 

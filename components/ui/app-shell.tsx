@@ -47,9 +47,9 @@ export function EmptySyncState({ icon, title, body, action }: { icon: string; ti
 // Stable placeholder for a route's main column while its data streams in. It mirrors the page
 // header and list rhythm so the real content replaces it without shifting the layout.
 export function PageSkeleton({ label = "Loading", rows = 7 }: { label?: string; rows?: number }) {
-  return <SkeletonTransition><main className="page page-skeleton" aria-busy="true">
+  return <SkeletonTransition><main className="page page-skeleton cg-skeleton" aria-busy="true">
     <span className="sr-only" role="status">{label}</span>
-    <div className="sk-head" aria-hidden="true"><i className="skeleton" style={{ width: 160, height: 24 }} /><i className="skeleton" style={{ width: 280, height: 14 }} /></div>
+    <div className="sk-head" aria-hidden="true"><i className="skeleton" style={{ width: 160, height: 30 }} /><i className="skeleton" style={{ width: 280, height: 20 }} /></div>
     <div className="sk-rows" aria-hidden="true">{Array.from({ length: rows }, (_, index) => <div className="sk-row" key={index}><i className="skeleton" style={{ width: 8, height: 8 }} /><i className="skeleton" style={{ width: `${48 + ((index * 17) % 40)}%`, height: 12 }} /><i className="skeleton" style={{ width: 64, height: 12, justifySelf: "end" }} /></div>)}</div>
   </main></SkeletonTransition>;
 }

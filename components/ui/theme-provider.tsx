@@ -25,7 +25,15 @@ type ViewTransitionDocument = { startViewTransition?: (update: () => void) => { 
 function revealTheme(commit: () => void, next: ResolvedTheme, origin?: { x: number; y: number }) {
   const root = document.documentElement;
   const start = (document as unknown as ViewTransitionDocument).startViewTransition?.bind(document);
-  if (!start || root.dataset.theme === next || window.matchMedia("(prefers-reduced-motion: reduce)").matches) { commit(); return; }
+  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches || root.dataset.theme === next) { commit(); return; }
+  if (!start) {
+    // No view transitions: crossfade colours for a moment (the CSS hook lives in app/motion.css).
+    root.dataset.themeFx = "";
+    void root.offsetWidth;
+    commit();
+    window.setTimeout(() => { delete root.dataset.themeFx; }, 260);
+    return;
+  }
   const x = origin?.x ?? window.innerWidth / 2, y = origin?.y ?? 0;
   const radius = Math.hypot(Math.max(x, window.innerWidth - x), Math.max(y, window.innerHeight - y));
   root.dataset.vt = "theme";

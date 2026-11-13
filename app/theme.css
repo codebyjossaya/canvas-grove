@@ -53,6 +53,9 @@
   --shadow-soft: 0 1px 2px rgba(17, 17, 22, .05);
   --shadow-raised: 0 12px 32px rgba(17, 17, 22, .12), 0 2px 6px rgba(17, 17, 22, .06);
   --shadow-panel: 0 1px 0 rgba(17, 17, 22, .03), 0 0 0 1px rgba(17, 17, 22, .045);
+  /* Motion washes: translucent layers drawn by .button::before (see docs/MOTION.md). */
+  --btn-wash-accent: rgba(16, 18, 80, .14); --btn-glow-accent: rgba(255, 255, 255, .24); --btn-lift-accent: rgba(75, 79, 214, .45);
+  --btn-wash-neutral: rgba(17, 17, 22, .045); --btn-glow-neutral: rgba(17, 17, 22, .08); --btn-lift-neutral: rgba(17, 17, 22, .22);
   /* Course identity marks: used only as small dots, bars and code chips. */
   --course-0: #4b4fd6; --course-1: #0f8a7e; --course-2: #c2410c; --course-3: #b2307a;
   --course-4: #2f7d32; --course-5: #8b5cf6; --course-6: #b7791f; --course-7: #2563eb;
@@ -113,6 +116,8 @@
   --shadow-soft: 0 1px 2px rgba(0, 0, 0, .4);
   --shadow-raised: 0 16px 40px rgba(0, 0, 0, .55), 0 0 0 1px rgba(255, 255, 255, .06);
   --shadow-panel: 0 0 0 1px rgba(255, 255, 255, .055);
+  --btn-wash-accent: rgba(255, 255, 255, .1); --btn-glow-accent: rgba(255, 255, 255, .24); --btn-lift-accent: rgba(163, 166, 255, .35);
+  --btn-wash-neutral: rgba(255, 255, 255, .05); --btn-glow-neutral: rgba(255, 255, 255, .1); --btn-lift-neutral: rgba(0, 0, 0, .6);
   --course-0: #8e92ff; --course-1: #3cc4b4; --course-2: #f2884b; --course-3: #ec6fb5;
   --course-4: #6ccf72; --course-5: #b69bfc; --course-6: #e2b04f; --course-7: #6aa1ff;
 }

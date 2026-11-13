@@ -8,7 +8,7 @@
   /* Damped spring (zeta about .72): about 4% overshoot, settles cleanly. */
   --ease-spring:linear(0,.028,.098,.194,.303,.415,.524,.625,.715,.793,.858,.911,.952,.983,1.006,1.022,1.032,1.037,1.038,1.038,1.035,1.031,1.027,1.023,1.019,1.015,1.011,1.008,1.006,1.004,1.002,1.001,1);
   --ease-out-expo:cubic-bezier(.16,1,.3,1);
-  --vt-exit:140ms;--vt-enter:340ms;--vt-move:420ms;
+  --vt-exit:120ms;--vt-enter:200ms;--vt-move:380ms;
   interpolate-size:allow-keywords;
 }
 
@@ -19,23 +19,24 @@
 
 @keyframes vt-fade-out{to{opacity:0}}
 @keyframes vt-fade-in{from{opacity:0}}
-@keyframes vt-rise{from{transform:translate3d(0,10px,0) scale(.995);filter:blur(2px)}}
-@keyframes vt-sink{to{transform:translate3d(0,-4px,0)}}
-@keyframes vt-slide-from{from{translate:var(--vt-offset) 0;filter:blur(2px)}}
+@keyframes vt-rise{from{translate:0 4px}}
+@keyframes vt-sink{to{translate:0 -2px}}
+@keyframes vt-slide-from{from{translate:var(--vt-offset) 0}}
 @keyframes vt-slide-to{to{translate:var(--vt-offset) 0}}
 
 /* Default navigation: old page dissolves, new page rises into place. */
 ::view-transition-old(.page-out){animation:var(--vt-exit) var(--ease-standard) both vt-fade-out,var(--vt-exit) var(--ease-standard) both vt-sink}
-::view-transition-new(.page-in){animation:220ms var(--ease-out) 60ms both vt-fade-in,var(--vt-enter) var(--ease-out-expo) both vt-rise}
+::view-transition-new(.page-in){animation:var(--vt-enter) var(--ease-out) both vt-fade-in,var(--vt-enter) var(--ease-out-expo) both vt-rise}
 
 /* Drilling in / backing out: a short directional slide. */
 ::view-transition-old(.nav-forward){--vt-offset:-32px;animation:var(--vt-exit) ease-in both vt-fade-out,var(--vt-move) var(--ease-out-expo) both vt-slide-to}
-::view-transition-new(.nav-forward){--vt-offset:48px;animation:220ms var(--ease-out) 80ms both vt-fade-in,var(--vt-move) var(--ease-out-expo) both vt-slide-from}
+::view-transition-new(.nav-forward){--vt-offset:48px;animation:var(--vt-enter) var(--ease-out) 60ms both vt-fade-in,var(--vt-move) var(--ease-out-expo) both vt-slide-from}
 ::view-transition-old(.nav-back){--vt-offset:32px;animation:var(--vt-exit) ease-in both vt-fade-out,var(--vt-move) var(--ease-out-expo) both vt-slide-to}
-::view-transition-new(.nav-back){--vt-offset:-48px;animation:220ms var(--ease-out) 80ms both vt-fade-in,var(--vt-move) var(--ease-out-expo) both vt-slide-from}
+::view-transition-new(.nav-back){--vt-offset:-48px;animation:var(--vt-enter) var(--ease-out) 60ms both vt-fade-in,var(--vt-move) var(--ease-out-expo) both vt-slide-from}
 
 /* Skeleton hand-off. */
-::view-transition-new(.skeleton-in){animation:200ms var(--ease-standard) both vt-fade-in}
+/* .cg-skeleton owns the (delayed) skeleton fade-in in CSS; the transition must not fade it twice. */
+::view-transition-new(.skeleton-in){animation:none}
 ::view-transition-old(.skeleton-out){animation:120ms var(--ease-standard) both vt-fade-out}
 
 /* Active markers glide between items. */
@@ -59,20 +60,135 @@
 .tabbar a,.tabbar button{position:relative}
 .tab-pill{position:absolute;top:0;left:50%;width:32px;height:3px;margin-left:-16px;border-radius:0 0 3px 3px;background:var(--accent-primary);pointer-events:none}
 
-/* ---- micro-interactions ---- */
-.button{transition:background-color var(--motion-fast) var(--ease-standard),border-color var(--motion-fast) var(--ease-standard),color var(--motion-fast) var(--ease-standard),box-shadow var(--motion-base) var(--ease-standard),transform 300ms var(--ease-spring)}
-.button:active:not(:disabled){transform:scale(.97);transition-duration:var(--motion-fast),var(--motion-fast),var(--motion-fast),var(--motion-fast),90ms}
-.button.primary:hover:not(:disabled){box-shadow:inset 0 1px 0 rgba(255,255,255,.12),0 2px 10px color-mix(in srgb,var(--accent-primary) 28%,transparent)}
-.side-nav a,.sidebar-link,.sidebar-course,.tabbar a,.tabbar button{transition:background-color var(--motion-fast) var(--ease-standard),color var(--motion-fast) var(--ease-standard),transform 280ms var(--ease-spring)}
-.side-nav a:active,.sidebar-link:active,.sidebar-course:active,.tabbar a:active,.tabbar button:active{transform:scale(.97);transition-duration:var(--motion-fast),var(--motion-fast),90ms}
-.tabbar svg{transition:transform 380ms var(--ease-spring)}
-.tabbar [aria-current="page"] svg{transform:translateY(-1px) scale(1.06)}
-.theme-icon{transition:transform 520ms var(--ease-spring)}
-.theme-toggle:active .theme-icon{transform:rotate(-30deg) scale(.9);transition-duration:90ms}
+/* ---- shared motion primitives (docs/MOTION.md) ---- */
+:root{
+  --ease-pop:cubic-bezier(.34,1.56,.64,1);   /* overshoot: press release, thumbs, icon pops */
+  --ease-press:cubic-bezier(.4,0,1,1);       /* ease-in: pressing down feels immediate */
+  --dur-press:70ms;--dur-release:240ms;--dur-enter:200ms;--dur-first:160ms;--dur-exit:100ms;--dur-step:20ms;
+}
+@keyframes cg-rise{from{opacity:.15;translate:0 6px}}
+@keyframes cg-pop-in{from{opacity:0;translate:0 -4px;scale:.97}}
+@keyframes cg-spin{to{rotate:360deg}}
+@keyframes cg-ring{from{outline-offset:-2px;outline-color:transparent}}
+@keyframes cg-draw{to{stroke-dashoffset:0}}
 
-/* Smooth disclosure for content <details> (popover-style ones opt out). */
-details:not([class*="moreTabs"])::details-content{block-size:0;overflow-y:clip;opacity:0;transition:block-size 320ms var(--ease-out-expo),opacity 200ms var(--ease-standard),content-visibility 320ms allow-discrete}
-details:not([class*="moreTabs"])[open]::details-content{block-size:auto;opacity:1}
+/* ---- buttons: layered wash + pointer glow (::before), grown shadow (::after), lift/press on the
+   individual transform properties so they compose. Disabled controls never move. ---- */
+.button{position:relative;isolation:isolate;--btn-wash:var(--btn-wash-neutral);--btn-glow:var(--btn-glow-neutral);--btn-lift:var(--btn-lift-neutral);--spin:currentColor;
+  transition:background-color var(--motion-fast) var(--ease-standard),border-color var(--motion-fast) var(--ease-standard),color var(--motion-fast) var(--ease-standard),translate var(--motion-base) var(--ease-out),scale var(--dur-release) var(--ease-pop)}
+.button.primary{--btn-wash:var(--btn-wash-accent);--btn-glow:var(--btn-glow-accent);--btn-lift:var(--btn-lift-accent);--spin:var(--accent-on-primary)}
+.button::before,.button::after{content:"";position:absolute;z-index:-1;inset:-1px;border-radius:inherit;pointer-events:none;opacity:0}
+.button::before{background:radial-gradient(circle 96px at var(--mx,50%) var(--my,50%),var(--btn-glow),var(--btn-wash));transition:opacity var(--motion-base) var(--ease-standard)}
+.button::after{inset:0;box-shadow:0 8px 14px -6px var(--btn-lift);transition:opacity var(--motion-base) var(--ease-out)}
+.button:active:not(:disabled){scale:.965;translate:0 0;transition-duration:var(--motion-fast),var(--motion-fast),var(--motion-fast),var(--dur-press),var(--dur-press);transition-timing-function:var(--ease-standard),var(--ease-standard),var(--ease-standard),var(--ease-press),var(--ease-press)}
+.button.icon:active:not(:disabled){scale:.92}
+.button:focus-visible{animation:cg-ring 150ms var(--ease-out)}
+.button:disabled,.button[aria-disabled="true"]{transition:none}
+@media (hover:hover){
+  .button:hover:not(:disabled)::before{opacity:1}
+  .button:is(.primary,.secondary):not(.icon):hover:not(:disabled){translate:0 -1px}
+  .button:is(.primary,.secondary):not(.icon):hover:not(:disabled)::after{opacity:1}
+}
+/* Loading: the icon swaps for a spinner (no layout shift); icon-less buttons show the spinner alone. */
+.button[aria-busy="true"]::after{inset:auto;left:50%;top:50%;width:14px;height:14px;margin:-7px 0 0 -7px;box-shadow:none;border:2px solid var(--spin);border-right-color:transparent;border-radius:50%;opacity:1;z-index:1;animation:cg-spin 640ms linear infinite}
+.button[aria-busy="true"]:has(>svg:first-child)::after{left:calc(var(--space-3) + 7px)}
+.button.icon[aria-busy="true"]::after{left:50%}
+.button[aria-busy="true"]>svg:first-child{opacity:0}
+.button[aria-busy="true"]:not(:has(>svg:first-child)){color:transparent!important}
+
+.danger-button{transition:color var(--motion-fast) var(--ease-standard)}
+.inline-link{background:linear-gradient(currentColor,currentColor) 0 100%/0 1px no-repeat;transition:background-size var(--motion-slow) var(--ease-out)}
+@media (hover:hover){.inline-link:hover{background-size:100% 1px}}
+a.chip,button.chip{transition:background-color var(--motion-fast) var(--ease-standard),scale var(--dur-release) var(--ease-pop)}
+a.chip:active,button.chip:active{scale:.94;transition-duration:var(--motion-fast),var(--dur-press)}
+
+/* Filter pills / segmented controls (module classes): quick colour change plus a small press. */
+[class*="chips"]>button,[class*="segmented"]>:is(button,a){transition:background-color var(--motion-fast) var(--ease-standard),color var(--motion-fast) var(--ease-standard),border-color var(--motion-fast) var(--ease-standard),box-shadow var(--motion-fast) var(--ease-standard),scale var(--dur-release) var(--ease-pop)}
+[class*="chips"]>button:active,[class*="segmented"]>:is(button,a):active{scale:.95;transition-duration:var(--motion-fast),var(--motion-fast),var(--motion-fast),var(--motion-fast),var(--dur-press)}
+@media (hover:hover){[class*="chips"]>button:not([aria-pressed="true"]):hover{background:var(--surface-hover)}}
+
+/* Quiz answers are time-sensitive: a crisp 90ms state change, a tiny press, no travel. */
+[class*="options"] label{transition:border-color 90ms var(--ease-standard),background-color 90ms var(--ease-standard),box-shadow 90ms var(--ease-standard),scale 140ms var(--ease-pop)}
+[class*="options"] label:active{scale:.992;transition-duration:60ms,60ms,60ms,60ms}
+[class*="questionNav"] button{transition:background-color 90ms var(--ease-standard),border-color 90ms var(--ease-standard),color 90ms var(--ease-standard)}
+
+/* Dense navigation: background fade only, never lift or scale (keyboard moves must feel instant). */
+.side-nav a,.sidebar-link,.sidebar-course,.tabbar a,.tabbar button,.sync-compact,.search-trigger{transition:background-color 90ms var(--ease-standard),color 90ms var(--ease-standard),border-color 90ms var(--ease-standard)}
+.tabbar svg{transition:scale 320ms var(--ease-pop),translate 320ms var(--ease-pop)}
+.tabbar [aria-current="page"] svg{translate:0 -1px;scale:1.06}
+
+/* Theme toggle: sun and moon cross-rotate. Both icons stay rendered; opacity/rotation selects one. */
+:root[data-theme] .theme-icon{display:grid;transition:opacity var(--motion-base) var(--ease-standard),rotate 360ms var(--ease-pop),scale 360ms var(--ease-pop)}
+:root[data-theme] .theme-icon-moon,:root[data-theme="dark"] .theme-icon-sun{opacity:1;rotate:0deg;scale:1}
+:root[data-theme] .theme-icon-sun,:root[data-theme="dark"] .theme-icon-moon{opacity:0;rotate:-90deg;scale:.5}
+.theme-toggle:active .theme-icon{scale:.85;transition-duration:var(--motion-fast),var(--dur-press),var(--dur-press)}
+.theme-toggle{transition:background-color var(--motion-fast) var(--ease-standard),color var(--motion-fast) var(--ease-standard)}
+/* Fallback theme crossfade for browsers without view transitions (class is set for ~260ms). */
+:root[data-theme-fx] *,:root[data-theme-fx] *::before,:root[data-theme-fx] *::after{transition:background-color 200ms var(--ease-standard),color 200ms var(--ease-standard),border-color 200ms var(--ease-standard),fill 200ms var(--ease-standard),stroke 200ms var(--ease-standard)}
+
+/* ---- icon micro-motion utilities ---- */
+.cg-chevron{transition:rotate var(--motion-base) var(--ease-out)}
+:is([aria-expanded="true"],[open]) .cg-chevron,.cg-chevron[data-open="true"]{rotate:90deg}
+.cg-arrow{transition:translate var(--motion-base) var(--ease-out)}
+@media (hover:hover){:is(.button,a):hover .cg-arrow{translate:2px 0}}
+.cg-check path,.cg-check polyline{stroke-dasharray:24;stroke-dashoffset:24}
+.cg-check[data-on="true"] path,.cg-check[data-on="true"] polyline,[aria-checked="true"]>.cg-check path,input:checked+.cg-check path{animation:cg-draw 260ms var(--ease-out) forwards}
+
+/* Toggle switch + checkbox (opt-in): <input type=checkbox class="cg-switch"> / class="cg-checkbox". */
+.cg-switch{appearance:none;position:relative;flex:none;width:34px;height:20px;margin:0;border-radius:var(--radius-full);background:var(--surface-muted);box-shadow:inset 0 0 0 1px var(--border-strong);transition:background-color var(--motion-base) var(--ease-standard)}
+.cg-switch::after{content:"";position:absolute;left:2px;top:2px;width:16px;height:16px;border-radius:50%;background:var(--surface-raised);box-shadow:var(--shadow-soft),0 0 0 1px var(--border-subtle);transition:translate 300ms var(--ease-pop),scale 200ms var(--ease-pop)}
+.cg-switch:checked{background:var(--accent-primary);box-shadow:none}
+.cg-switch:checked::after{translate:14px 0;box-shadow:var(--shadow-soft)}
+.cg-switch:active::after{scale:1.12 .92}
+.cg-checkbox{appearance:none;position:relative;flex:none;width:18px;height:18px;margin:0;border-radius:var(--radius-xs);background:var(--surface-raised);box-shadow:inset 0 0 0 1.5px var(--border-strong);transition:background-color var(--motion-fast) var(--ease-standard),box-shadow var(--motion-fast) var(--ease-standard),scale var(--dur-release) var(--ease-pop)}
+.cg-checkbox::after{content:"";position:absolute;left:5px;top:2px;width:5px;height:9px;border:solid var(--accent-on-primary);border-width:0 2px 2px 0;rotate:45deg;clip-path:inset(0 100% 100% 0);transition:clip-path var(--motion-base) var(--ease-out) var(--dur-press)}
+.cg-checkbox:checked{background:var(--accent-primary);box-shadow:none}
+.cg-checkbox:checked::after{clip-path:inset(0)}
+.cg-checkbox:active{scale:.88;transition-duration:var(--motion-fast),var(--motion-fast),var(--dur-press)}
+.cg-switch:focus-visible,.cg-checkbox:focus-visible{animation:cg-ring 150ms var(--ease-out)}
+
+/* ---- overlays: .cg-pop (menus, popovers, dialogs) and .cg-sheet (bottom sheets). Enter 200ms with
+   fade + small translate/scale from --cg-from; exit is quieter (100ms). @starting-style plus
+   allow-discrete drive [popover] and <dialog>; browsers lacking either just show/hide instantly. ---- */
+.cg-pop,.cg-sheet,.sync-popover{transform-origin:var(--origin,50% 0)}
+.cg-pop:is([popover],dialog),.sync-popover{opacity:0;translate:0 -6px;scale:.97;transition:opacity var(--dur-exit) var(--ease-standard),translate var(--dur-exit) var(--ease-standard),scale var(--dur-exit) var(--ease-standard),overlay var(--dur-exit) allow-discrete,display var(--dur-exit) allow-discrete}
+.cg-sheet:is([popover],dialog){opacity:0;translate:0 14px;transition:opacity var(--dur-exit) var(--ease-standard),translate var(--dur-exit) var(--ease-standard),overlay var(--dur-exit) allow-discrete,display var(--dur-exit) allow-discrete}
+.cg-pop:is(:popover-open,[open]),.sync-popover:popover-open{opacity:1;translate:none;scale:1;transition-duration:var(--dur-enter);transition-timing-function:var(--ease-out)}
+.cg-sheet:is(:popover-open,[open]){opacity:1;translate:none;transition-duration:var(--dur-enter);transition-timing-function:var(--ease-out)}
+@starting-style{
+  .cg-pop:is(:popover-open,[open]),.sync-popover:popover-open{opacity:0;translate:0 -6px;scale:.97}
+  .cg-sheet:is(:popover-open,[open]){opacity:0;translate:0 14px}
+}
+.sync-popover{--origin:0 100%}
+.sync-popover:popover-open{animation:none}
+@media (max-width:767px){.sync-popover{--origin:50% 0}}
+.cg-pop::backdrop,.cg-sheet::backdrop{background:var(--surface-overlay);opacity:0;transition:opacity var(--dur-exit) var(--ease-standard),overlay var(--dur-exit) allow-discrete,display var(--dur-exit) allow-discrete}
+.cg-pop[open]::backdrop,.cg-sheet[open]::backdrop,.cg-pop:popover-open::backdrop{opacity:1;transition-duration:var(--dur-enter)}
+@starting-style{.cg-pop[open]::backdrop,.cg-sheet[open]::backdrop,.cg-pop:popover-open::backdrop{opacity:0}}
+/* Mount-driven (conditionally rendered) surfaces use the keyframe form. */
+.cg-enter{animation:cg-pop-in var(--dur-enter) var(--ease-out-expo) backwards}
+
+/* ---- page content: fade + a few px rise, staggered through CSS only. Targets the page root's
+   children (.app-content>*>*) so it works for client navigations and streamed Suspense content.
+   First load (before html[data-cg-nav]) is shorter and flatter because it gates perceived load. ---- */
+:is(.cg-stagger,.app-content>:not(.cg-skeleton))>*{--cg-dur:var(--dur-enter);animation:cg-rise var(--cg-dur) var(--ease-out-expo) backwards;animation-delay:calc(var(--cg-i,0)*var(--dur-step))}
+:root:not([data-cg-nav]) :is(.cg-stagger,.app-content>:not(.cg-skeleton))>*{--cg-dur:var(--dur-first)}
+:is(.cg-stagger,.app-content>:not(.cg-skeleton))>:nth-child(2){--cg-i:1}
+:is(.cg-stagger,.app-content>:not(.cg-skeleton))>:nth-child(3){--cg-i:2}
+:is(.cg-stagger,.app-content>:not(.cg-skeleton))>:nth-child(4){--cg-i:3}
+:is(.cg-stagger,.app-content>:not(.cg-skeleton))>:nth-child(5){--cg-i:4}
+:is(.cg-stagger,.app-content>:not(.cg-skeleton))>:nth-child(6){--cg-i:5}
+:is(.cg-stagger,.app-content>:not(.cg-skeleton))>:nth-child(n+7){--cg-i:6}
+.app .app-content>:not(.cg-skeleton){animation:none}
+/* Opt out: .cg-still on the parent (its children) or .cg-still on a child itself. */
+.cg-still>*,.cg-still{animation:none!important}
+/* Skeletons wait 120ms (fast loads never flash one) and then fade in as a whole. */
+.cg-skeleton{animation:cg-fade var(--dur-enter) var(--ease-standard) 120ms backwards}
+:is(.landing,.orientation,.boot){animation:cg-fade var(--dur-enter) var(--ease-standard)}
+
+/* Disclosure for content <details>: opacity only (animating block-size is layout work) (popover-style ones opt out). */
+details:not([class*="moreTabs"])::details-content{opacity:0;transition:opacity var(--motion-base) var(--ease-standard),content-visibility var(--motion-base) allow-discrete}
+details:not([class*="moreTabs"])[open]::details-content{opacity:1}
 
 /* Sheets and overlays settle with a spring. */
 .sheet-scrim{animation:cg-fade var(--motion-base) var(--ease-standard)}
@@ -84,13 +200,32 @@ details:not([class*="moreTabs"])[open]::details-content{block-size:auto;opacity:
 
 /* Command palette: one highlight that glides to the active option. */
 .palette-list{position:relative}
-.palette-hl{position:absolute;top:0;left:6px;right:6px;z-index:0;border-radius:var(--radius-md);background:var(--surface-hover);pointer-events:none;transition:transform 260ms var(--ease-spring),height 200ms var(--ease-out),opacity var(--motion-fast)}
+.palette-hl{position:absolute;top:0;left:6px;right:6px;z-index:0;border-radius:var(--radius-md);background:var(--surface-hover);pointer-events:none;transition:transform 70ms var(--ease-out),opacity var(--motion-fast)}
 :root[data-theme="dark"] .palette-hl{background:var(--surface-muted)}
 .palette-list:has(.palette-hl) .palette-option[aria-selected="true"]{background:transparent}
 .palette-option,.palette-group,.palette-empty{position:relative;z-index:1}
 .palette-option{transition:color var(--motion-fast) var(--ease-standard)}
 
+/* ---- sliding selection indicator (components/ui/slide-indicators.tsx sets [data-slide] + --sx/--sy/--sw/--sh) ---- */
+[data-slide]{position:relative;isolation:isolate}
+[data-slide]>*{position:relative;z-index:1}
+[data-slide]::before{content:"";position:absolute;inset:0;z-index:0;transform-origin:0 0;translate:var(--sx,0) var(--sy,0);scale:var(--sw,1) var(--sh,1);border-radius:var(--radius-sm);background:var(--surface-raised);box-shadow:var(--shadow-soft),0 0 0 1px var(--border-subtle);pointer-events:none;transition:translate var(--dur-release) var(--ease-out-expo),scale var(--dur-release) var(--ease-out-expo)}
+[data-slide][class*="chips"]::before{border-radius:var(--radius-full);background:var(--surface-muted);box-shadow:none}
+[data-slide][role="tablist"]::before{border-radius:0;background:linear-gradient(var(--accent-primary),var(--accent-primary)) 0 100%/100% 2px no-repeat;box-shadow:none}
+[data-slide][class][class]>:is([aria-pressed="true"],[aria-selected="true"],[aria-current="page"]){background:transparent;box-shadow:none}
+[data-slide-snap]::before{transition:none}
+
+/* ---- reduced motion: no travel, no scale/rotate, no glow, no shimmer; content and skeletons keep a
+   100ms opacity fade. The :root:root prefix beats the blanket duration reset in globals.css. ---- */
 @media (prefers-reduced-motion:reduce){
+  :root:root :is(.cg-stagger,.app-content>:not(.cg-skeleton))>*,:root:root .cg-skeleton,:root:root :is(.landing,.orientation,.boot){animation:cg-fade 100ms linear backwards!important;animation-delay:0s!important}
+  :root:root .cg-enter{animation:cg-fade 100ms linear backwards!important}
+  .button,.button::before,.button::after,.cg-pop,.cg-sheet,.sync-popover{translate:none!important;scale:none!important;rotate:none!important}
+  .button::before{display:none}
+  [data-slide]::before{transition:none!important}
+  .button[aria-busy="true"]::after{animation:none!important}
+  .theme-icon,.cg-chevron,.cg-arrow,.cg-switch::after{rotate:none!important;scale:none!important}
+  .palette,.more-sheet{animation:cg-fade 100ms linear!important}
   ::view-transition-group(*),::view-transition-old(*),::view-transition-new(*){animation-duration:0s!important;animation-delay:0s!important}
   details::details-content{transition:none!important}
 }

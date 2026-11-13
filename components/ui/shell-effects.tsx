@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { SlideIndicators } from "./slide-indicators";
 
 // Cookie names are mirrored in lib/views/loaders.ts (server-only, so not imported here).
 const TZ = "cg_tz", SEEN_AT = "cg_seen_at", SEEN_PREV = "cg_seen_prev";
@@ -34,10 +35,26 @@ export function ShellEffects() {
       if (zone && decodeURIComponent(read(TZ) ?? "") !== zone) write(TZ, zone);
     } catch { /* ignore */ }
     touch();
+    // Motion hooks: html[data-cg-nav] ends the shorter first-load fade; a single delegated,
+    // rAF-throttled listener feeds .button's pointer glow (mouse only, never under reduced motion).
+    const root = document.documentElement;
+    const ready = window.setTimeout(() => { root.dataset.cgNav = "1"; }, 1500);
+    let frame = 0, last: PointerEvent | null = null;
+    const glow = () => {
+      frame = 0;
+      const button = (last?.target as Element | null)?.closest?.(".button:not(:disabled)") as HTMLElement | null;
+      if (!button || !last) return;
+      const box = button.getBoundingClientRect();
+      button.style.setProperty("--mx", `${last.clientX - box.left}px`);
+      button.style.setProperty("--my", `${last.clientY - box.top}px`);
+    };
+    const move = (event: PointerEvent) => { if (event.pointerType === "mouse") { last = event; if (!frame) frame = window.requestAnimationFrame(glow); } };
+    const wantsGlow = window.matchMedia("(hover: hover)").matches && !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (wantsGlow) document.addEventListener("pointermove", move, { passive: true });
     // Keep "last active" current during long sessions of client-side navigation.
     const timer = window.setInterval(touch, 5 * 60_000);
     document.addEventListener("visibilitychange", touch);
-    return () => { window.clearInterval(timer); document.removeEventListener("visibilitychange", touch); };
+    return () => { window.clearInterval(timer); window.clearTimeout(ready); window.cancelAnimationFrame(frame); document.removeEventListener("visibilitychange", touch); document.removeEventListener("pointermove", move); };
   }, []);
-  return null;
+  return <SlideIndicators />;
 }

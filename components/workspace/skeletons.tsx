@@ -2,7 +2,7 @@ import styles from "./inbox.module.css";
 
 /** Two-pane placeholder that matches the inbox layout so streaming in causes no shift. */
 export function InboxSkeleton() {
-  return <main className={styles.inbox} aria-busy="true">
+  return <main className={`${styles.inbox} cg-skeleton`} aria-busy="true">
     <span className="sr-only" role="status">Loading inbox</span>
     <section className={styles.listPane} aria-hidden="true">
       <div className={styles.listHead}><i className="skeleton" style={{ width: 90, height: 24 }} /><i className="skeleton" style={{ width: 220, height: 28 }} /></div>

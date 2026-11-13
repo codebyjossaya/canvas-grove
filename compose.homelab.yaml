@@ -1,6 +1,10 @@
 # jc-homelab override: publish over the tailnet as https://canvas-grove.tail8dc4e4.ts.net
 # via a Tailscale sidecar (same pattern as the other homelab apps).
 services:
+  app:
+    environment:
+      # MCP/OAuth issuer allow-list (first entry is the default). See lib/mcp/origin.ts.
+      GROVE_ALLOWED_HOSTS: canvas.jcamille.dev,canvas-grove.tail8dc4e4.ts.net
   lan-gateway:
     ports: !override
       - "127.0.0.1:${LAN_PORT:-3000}:8080"

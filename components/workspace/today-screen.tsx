@@ -3,6 +3,7 @@ import { Icon } from "@/components/ui/icons";
 import { formatInstant } from "@/lib/time";
 import { relativePast } from "@/lib/views/dates";
 import type { DigestEntry, TodayView } from "@/lib/views/types";
+import { ConnectAgentButton } from "./connect-agent/connect-agent-button";
 import { WorkList } from "./work-row";
 import styles from "./today.module.css";
 import { NAV_FORWARD } from "@/components/ui/page-transition";
@@ -30,7 +31,7 @@ export function TodayScreen({ view }: { view: TodayView }) {
         <h1>{greeting(now, zone)}{view.greetingName ? `, ${view.greetingName}` : ""}</h1>
         {view.hasAnyData && <p className="num">{summary}</p>}
       </div>
-      <div className="page-actions"><AppLink className="button secondary" href="/planner"><Icon name="calendar" />Planner</AppLink></div>
+      <div className="page-actions"><ConnectAgentButton /><AppLink className="button secondary" href="/planner"><Icon name="calendar" />Planner</AppLink></div>
     </header>
 
     {!view.hasAnyData && <section className={styles.banner}>

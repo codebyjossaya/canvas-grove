@@ -1,5 +1,7 @@
 import { AppLink } from "@/components/ui/app-link";
 import { CanvasSessionManager } from "@/components/ui/canvas-session";
+import { ConnectAgentButton } from "./connect-agent/connect-agent-button";
+import { ConnectionsSection } from "./connect-agent/connections-list";
 import { ExtensionDevices } from "./extension-devices";
 import { BackgroundSyncStatus } from "@/components/ui/sync-status";
 import { ThemeControl } from "@/components/ui/theme-provider";
@@ -15,14 +17,19 @@ const shortcuts: Array<[string[], string]> = [
 
 export function SettingsScreen() {
   return <main className={`page ${styles.page}`}>
-    <header className="page-head"><div><h1>Settings</h1><p>Connection, sync, appearance and privacy.</p></div><div className="page-actions"><AppLink className="button secondary" href="/welcome?replay=1">Replay orientation</AppLink></div></header>
+    <header className="page-head"><div><h1>Settings</h1><p>Connection, sync, appearance and privacy.</p></div><div className="page-actions"><ConnectAgentButton /><AppLink className="button secondary" href="/welcome?replay=1">Replay orientation</AppLink></div></header>
     <div className={styles.layout}>
       <nav className={styles.toc} aria-label="Settings sections">
-        <a href="#connection">Canvas connection</a><a href="#extension">Browser extension</a><a href="#sync">Sync</a><a href="#appearance">Appearance</a><a href="#time">Time zone</a><a href="#shortcuts">Keyboard</a>
+        <a href="#connection">Canvas connection</a><a href="#extension">Browser extension</a><a href="#agents">Agents (MCP)</a><a href="#sync">Sync</a><a href="#appearance">Appearance</a><a href="#time">Time zone</a><a href="#shortcuts">Keyboard</a>
       </nav>
       <div className={styles.sections}>
         <section id="connection" className={styles.section} aria-label="Canvas connection"><CanvasSessionManager /></section>
         <ExtensionDevices />
+        <section id="agents" className="panel" aria-labelledby="agents-heading">
+          <h2 id="agents-heading">Agents (MCP)</h2>
+          <p>Let an AI assistant such as Claude, ChatGPT, Cursor or Codex read your courses, assignments and grades. By default it is read-only. Anything it proposes, such as submitting work, waits for your approval, and you can revoke access at any time.</p>
+          <ConnectionsSection />
+        </section>
         <section id="sync" className={styles.section} aria-label="Sync"><BackgroundSyncStatus /></section>
         <section id="appearance" className={`panel ${styles.row}`} aria-labelledby="appearance-heading">
           <div><h2 id="appearance-heading">Appearance</h2><p>Light or dark. Resetting follows this device’s setting.</p></div>

@@ -85,6 +85,27 @@
       "when": 1794232800000,
       "tag": "0011_page_keepalive_kind",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1794240000000,
+      "tag": "0012_mcp",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1794247200000,
+      "tag": "0013_mcp_actions",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1794254400000,
+      "tag": "0014_mcp_hardening",
+      "breakpoints": true
     }
   ]
 }

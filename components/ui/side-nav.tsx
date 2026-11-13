@@ -6,6 +6,7 @@ import { AppLink, stripBase, useNavBase } from "./app-link";
 import { Icon } from "./icons";
 import type { SidebarCourse } from "@/lib/views/types";
 import { ActiveMarker } from "./page-transition";
+import { ApprovalsBadge } from "@/components/workspace/approvals/approvals-badge";
 
 export const primaryLinks = [
   { href: "/", icon: "today", label: "Today", key: "t" },
@@ -20,6 +21,7 @@ export function activeHref(pathname: string) {
   if (pathname === "/") return "/";
   if (pathname.startsWith("/grades")) return "/courses";
   if (pathname.startsWith("/settings")) return "/settings";
+  if (pathname.startsWith("/approvals")) return "/approvals";
   return primaryLinks.find(link => link.href !== "/" && (pathname === link.href || pathname.startsWith(`${link.href}/`)))?.href ?? null;
 }
 
@@ -42,7 +44,11 @@ function NavLinks({ active }: { active: string | null }) {
 }
 
 export function SettingsLink() {
-  return <Suspense fallback={<SettingsAnchor active={false} />}><ActiveSettings /></Suspense>;
+  return <Suspense fallback={<SettingsAnchor active={false} />}><ApprovalsAnchor /><ActiveSettings /></Suspense>;
+}
+function ApprovalsAnchor() {
+  const active = useActive().startsWith("/approvals");
+  return <AppLink className="sidebar-link" href="/approvals" aria-current={active ? "page" : undefined}>{active && <ActiveMarker name="nav-pill" className="nav-pill" />}<Icon name="check" /><span>Approvals</span><ApprovalsBadge /></AppLink>;
 }
 function ActiveSettings() { return <SettingsAnchor active={useActive().startsWith("/settings")} />; }
 function SettingsAnchor({ active }: { active: boolean }) {
@@ -79,7 +85,7 @@ function Tabs({ active }: { active: string | null }) {
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [open]);
-  const moreActive = active === "/quizzes" || active === "/settings";
+  const moreActive = active === "/quizzes" || active === "/settings" || active === "/approvals";
   return <>
     <nav className="tabbar" aria-label="Primary">
       {tabs.map(item => <AppLink key={item.href} href={item.href} aria-current={active === item.href ? "page" : undefined} onClick={() => setOpen(false)}>{active === item.href && <ActiveMarker name="tab-pill" className="tab-pill" />}<Icon name={item.icon} /><span>{item.label}</span></AppLink>)}
@@ -90,6 +96,7 @@ function Tabs({ active }: { active: string | null }) {
       <div className="more-sheet" id="more-sheet" role="menu" aria-label="More">
         <AppLink role="menuitem" href="/quizzes" onClick={() => setOpen(false)}><Icon name="quiz" />Quizzes</AppLink>
         <AppLink role="menuitem" href="/grades" onClick={() => setOpen(false)}><Icon name="grade" />Course grades</AppLink>
+        <AppLink role="menuitem" href="/approvals" onClick={() => setOpen(false)}><Icon name="check" />Approvals<ApprovalsBadge /></AppLink>
         <AppLink role="menuitem" href="/settings" onClick={() => setOpen(false)}><Icon name="settings" />Settings</AppLink>
       </div>
     </>}

@@ -1,0 +1,26 @@
+/* OAuth consent: one Grove panel on the page surface. Colors come only from theme tokens,
+   so light and dark follow app/theme.css. */
+.stage { min-height: 100dvh; display: grid; place-items: center; padding: var(--space-8, 2rem) 16px; background: var(--surface-page); color: var(--text-primary); }
+.card { width: min(100%, 460px); display: grid; gap: var(--space-4, 1rem); }
+.brand { display: flex; align-items: center; gap: 8px; font-weight: 650; font-size: var(--fs-base, 15px); color: var(--text-primary); }
+.panel { display: grid; gap: var(--space-4, 1rem); }
+.eyebrow { margin: 0; font-size: var(--fs-2xs, 11px); font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--text-muted); }
+.title { margin: 0; font-size: var(--fs-lg, 20px); line-height: 1.3; font-weight: 650; color: var(--text-primary); text-wrap: balance; }
+.client { color: var(--accent-text); overflow-wrap: anywhere; }
+.lead { margin: 0; color: var(--text-secondary); font-size: var(--fs-sm, 13px); }
+.facts { margin: 0; display: grid; border: 1px solid var(--border-subtle); border-radius: var(--radius-md, 8px); background: var(--surface-sunken); }
+.facts > div { display: grid; gap: 4px; padding: 12px 14px; }
+.facts > div + div { border-top: 1px solid var(--border-subtle); }
+.facts dt { font-size: var(--fs-2xs, 11px); font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: .03em; }
+.facts dd { margin: 0; font-size: var(--fs-sm, 13px); color: var(--text-primary); overflow-wrap: anywhere; }
+.host { font-family: var(--font-mono, ui-monospace, monospace); font-size: var(--fs-sm, 13px); padding: 1px 6px; border-radius: 4px; background: var(--surface-muted); color: var(--text-primary); }
+.actions { display: flex; justify-content: flex-end; gap: var(--space-2, 8px); flex-wrap: wrap; }
+.actions :global(.button) { min-width: 112px; }
+.fine { margin: 0; font-size: var(--fs-xs, 12px); color: var(--text-muted); }
+@media (max-width: 420px) { .actions { flex-direction: column-reverse; } .actions :global(.button) { width: 100%; } }
+.destination { display: grid; gap: 6px; padding: 12px 14px; border: 1px solid var(--status-warning-border); border-radius: var(--radius-md, 8px); background: var(--status-warning-soft); color: var(--text-primary); font-size: var(--fs-sm, 13px); }
+.hostLarge { font-family: var(--font-mono, ui-monospace, monospace); font-size: var(--fs-md, 16px); font-weight: 650; color: var(--text-primary); overflow-wrap: anywhere; }
+.form { display: grid; gap: var(--space-4, 1rem); }
+.option { display: flex; gap: 10px; align-items: flex-start; padding: 12px 14px; border: 1px solid var(--border-subtle); border-radius: var(--radius-md, 8px); font-size: var(--fs-sm, 13px); color: var(--text-primary); cursor: pointer; }
+.option input { margin-top: 3px; accent-color: var(--accent-primary); }
+.option > span { display: grid; gap: 4px; }

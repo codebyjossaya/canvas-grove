@@ -213,7 +213,7 @@ test("sync and app code no longer execute Canvas requests through the hosted bro
   }
   assert.doesNotMatch(hosted.slice(hosted.indexOf("export interface HostedBrowserProvider"), hosted.indexOf("export interface HostedSessionStore")), /\bexecute\(/);
   for (const provider of ["self-hosted", "browserbase", "dev"]) assert.doesNotMatch(read(`../lib/bridge/providers/${provider}.ts`), /async execute\(/, provider);
-  assert.match(worker, /executeCanvasSyncJob\(\{ kind: job\.kind, api: client \}\)/);
+  assert.match(worker, /executeCanvasSyncJob\(\{ kind: job\.kind, api: client, /);
   assert.doesNotMatch(worker, /status in \('provisioning','auth_required','active','failed'\)/, "active sessions no longer protect a sync browser");
 });
 

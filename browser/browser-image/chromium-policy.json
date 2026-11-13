@@ -11,5 +11,19 @@
   "TranslateEnabled": false,
   "PromotionsEnabled": false,
   "DefaultNotificationsSetting": 2,
-  "DefaultGeolocationSetting": 2
+  "DefaultGeolocationSetting": 2,
+  "URLBlocklist": ["devtools://*", "view-source:*", "file://*"],
+  "NewTabPageLocation": "chrome://version/",
+  "IncognitoModeAvailability": 1,
+  "BrowserGuestModeEnabled": false,
+  "BrowserAddPersonEnabled": false,
+  "DownloadRestrictions": 3,
+  "PrintingEnabled": false,
+  "BookmarkBarEnabled": false,
+  "EditBookmarksEnabled": false,
+  "SearchSuggestEnabled": false,
+  "TaskManagerEndProcessEnabled": false,
+  "AllowFileSelectionDialogs": false,
+  "QRCodeGeneratorEnabled": false,
+  "ScreenCaptureAllowed": false
 }

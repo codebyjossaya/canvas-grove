@@ -55,7 +55,9 @@ export function safeQuizHtml(value: unknown): string {
 }
 export function hasUnsupportedQuizMedia(value: unknown): boolean {
   if (typeof value !== "string") return false;
-  return /<(img|video|audio|svg|math|canvas|iframe|object|embed)\b/i.test(value);
+  // Images and equations render natively (Canvas files/equation images stream through Grove's proxy;
+  // MathML renders in the browser). Players and embeds cannot run here.
+  return /<(video|audio|svg|canvas|iframe|object|embed)\b/i.test(value);
 }
 export function questionHasUnsupportedMedia(value: Record<string, unknown>): boolean {
   const source = isRecord(value.quiz_question) ? value.quiz_question : value;
@@ -70,12 +72,17 @@ export function restrictionReason(value: Record<string, unknown>, engine = "clas
   if (value.require_lockdown_browser === true || value.require_lockdown_browser_monitor === true || /honorlock|respondus|lockdown browser|proctoru|proctored/.test(text)) return "This quiz requires proctoring or a lockdown browser. Take it directly in Canvas so those controls remain intact.";
   if (value.access_code) return "This quiz requires an access code. Native Quiz Mode does not handle access-code protected attempts.";
   if (value.ip_filter) return "This quiz is restricted to an approved network. Take it directly in Canvas on that network.";
+  // one_question_at_a_time is supported: Canvas refuses the REST questions API for it (HTTP 401
+  // "unauthorized"), so lib/quizzes/oqaat.ts drives Canvas's own quiz player routes instead.
+  // cant_go_back stays blocked until its forward-only flow has been verified against Canvas.
   if (value.cant_go_back) return "This quiz prevents returning to earlier questions. Take it directly in Canvas so that rule is enforced exactly.";
   return null;
 }
 
 export function quizFailure(status: number, authRequired = false) {
-  if (authRequired || status === 401) return { status: 401, code: "CANVAS_AUTH_EXPIRED", error: "Canvas sign-in has expired. Reconnect Canvas, then return to the quiz." };
+  // A 401 without authRequired is Canvas's permission denial ("unauthorized"), not an expired sign-in.
+  if (status === 401 && !authRequired) return { status: 403, code: "QUIZ_PERMISSION_DENIED", error: "Canvas does not allow this quiz action from outside its own quiz player. Your Canvas connection is fine; open this quiz in Canvas." };
+  if (authRequired) return { status: 401, code: "CANVAS_AUTH_EXPIRED", error: "Canvas sign-in has expired. Reconnect Canvas, then return to the quiz." };
   if (status === 429) return { status: 429, code: "RATE_LIMITED", error: "Canvas is rate limiting quiz requests. Your last confirmed save remains in Canvas; wait a moment and retry." };
   if (status === 403) return { status: 403, code: "QUIZ_RESTRICTED", error: "Canvas is not allowing this quiz action. It may require an access code, approved network, or proctoring." };
   if (status === 404) return { status: 404, code: "QUIZ_NOT_FOUND", error: "This quiz is no longer available in Canvas." };

@@ -7,7 +7,7 @@
 // booleans only; cookie values and headers are never stored.
 import { SESSION_COOKIE_NAMES, type CanvasCallStats } from "./session-client";
 
-export type HealthKind = "keepalive" | "sync" | "restore-check" | "api";
+export type HealthKind = "keepalive" | "sync" | "restore-check" | "api" | "page-keepalive";
 export type HealthOutcome = "ok" | "auth_required" | "error";
 
 /** The complete, value-free column set of canvas_session_health_events (besides id). */
@@ -29,6 +29,16 @@ export function keepaliveMinutes(value: string | undefined): number {
   if (!value || !Number.isFinite(parsed)) return DEFAULT_KEEPALIVE_MINUTES;
   // Below 1 minute is abusive; above 19 could miss a 20-minute institution timeout.
   return Math.min(19, Math.max(1, Math.round(parsed)));
+}
+
+/** Alternate API and page keepalives: after an API keepalive do a page touch, and vice versa. Never more often than keepaliveDue allows. */
+export function nextKeepaliveKind(lastKeepaliveKind: string | null | undefined, pageEnabled: boolean): "keepalive" | "page-keepalive" {
+  return pageEnabled && lastKeepaliveKind === "keepalive" ? "page-keepalive" : "keepalive";
+}
+
+/** CANVAS_PAGE_KEEPALIVE: on unless explicitly 0/false/off/no. */
+export function pageKeepaliveEnabled(value: string | undefined): boolean {
+  return !/^(0|false|off|no)$/i.test((value ?? "").trim());
 }
 
 /** True when no Canvas call (of any kind) has been recorded for the session within the interval. */
@@ -91,7 +101,10 @@ export function summarizeHealth(input: { events: HealthEvent[]; capturedAt: Date
   const capturedAt = input.capturedAt ?? events[0]?.at ?? null;
   const start = capturedAt ? [capturedAt.getTime()] : [];
   const okTimes = events.filter((event) => event.ok_count > 0).map((event) => event.at.getTime());
-  const reissueTimes = events.filter((event) => event.session_cookie_reissued).map((event) => event.at.getTime());
+  // `rotated` covers every session cookie name; rows written before 2026-11-10 only counted `_normandy_session`
+  // in session_cookie_reissued, which missed schools on the newer `canvas_session` name (e.g. UF).
+  const reissued = (event: HealthEvent) => event.session_cookie_reissued || event.rotated;
+  const reissueTimes = events.filter(reissued).map((event) => event.at.getTime());
   const rotations = events.filter((event) => event.rotated);
   const firstFailure = events.find((event) => event.auth_required_count > 0) ?? null;
   // Only successes before the first auth failure count toward the proven lifetime.
@@ -102,7 +115,7 @@ export function summarizeHealth(input: { events: HealthEvent[]; capturedAt: Date
     capturedAt, sinceCaptureMs: capturedAt ? input.now.getTime() - capturedAt.getTime() : null, status: input.status, failureCode: input.failureCode,
     events: events.length, calls, ok: sum((event) => event.ok_count), authRequired: sum((event) => event.auth_required_count), errors: sum((event) => event.error_count),
     rotationCount: rotations.length, lastRotationAt: rotations.at(-1)?.at ?? null,
-    sessionCookieReissueRate: calls ? sum((event) => event.session_cookie_reissue_count) / calls : null,
+    sessionCookieReissueRate: calls ? sum((event) => Math.max(event.session_cookie_reissue_count, reissued(event) ? 1 : 0)) / calls : null,
     longestReissueGapMs: longestGap([...start, ...reissueTimes]),
     rememberCookiePresent: events.some((event) => event.remember_cookie_present), rememberCookieUsed: events.some((event) => event.remember_cookie_used),
     longestOkGapMs: longestGap([...start, ...okBeforeFailure]), lastOkAt: lastOk === null ? null : new Date(lastOk),

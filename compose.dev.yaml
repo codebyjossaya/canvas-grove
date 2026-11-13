@@ -1,0 +1,49 @@
+# jc-homelab DEV mode (not production): source is bind-mounted and every
+# service reloads on save. No image rebuilds for code changes.
+#   app             next dev (hot reload)
+#   sync-worker     tsx watch
+#   orchestrator/relay/egress-proxy   node --watch
+# Rebuild only when package.json/package-lock.json change:
+#   ./homelab-compose.sh build app && docker volume rm canvas-grove_dev_node_modules
+x-dev-node: &dev-node
+  build:
+    target: deps
+  user: "1000:1000"
+  working_dir: /app
+  volumes:
+    - .:/app
+    - dev_node_modules:/app/node_modules
+services:
+  migrate:
+    <<: *dev-node
+  app:
+    <<: *dev-node
+    command: ["npx", "next", "dev", "--hostname", "0.0.0.0", "--port", "3000"]
+    environment:
+      NODE_ENV: development
+      HOME: /tmp
+      NEXT_TELEMETRY_DISABLED: "1"
+    healthcheck:
+      start_period: 180s
+  sync-worker:
+    <<: *dev-node
+    command: ["npx", "tsx", "watch", "--clear-screen=false", "scripts/sync-worker.ts"]
+    environment:
+      NODE_ENV: development
+      HOME: /tmp
+  browser-orchestrator:
+    command: ["node", "--watch", "server.mjs"]
+    volumes:
+      - ./services/browser-orchestrator:/app
+  browser-relay:
+    working_dir: /srv/browser-relay
+    command: ["node", "--watch", "server.mjs"]
+    volumes:
+      - ./services:/srv:ro
+  browser-egress-proxy:
+    working_dir: /srv/browser-egress-proxy
+    command: ["node", "--watch", "server.mjs"]
+    volumes:
+      - ./services:/srv:ro
+volumes:
+  dev_node_modules:

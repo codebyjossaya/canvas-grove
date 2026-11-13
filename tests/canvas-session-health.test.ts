@@ -71,7 +71,7 @@ test("report: inconclusive verdicts for short runs, gaps, remember-me and missin
   const gap = summarizeHealth({ ...base, events: gapped });
   assert.equal(gap.longestOkGapMs, 2 * HOUR + 20 * 60_000);
   assert.equal(gap.verdict, "INCONCLUSIVE_OK_GAP_2h20m");
-  const noReissue = every10min(27).map((item) => ({ ...item, session_cookie_reissued: false, session_cookie_reissue_count: 0 }));
+  const noReissue = every10min(27).map((item) => ({ ...item, rotated: false, session_cookie_reissued: false, session_cookie_reissue_count: 0 }));
   assert.equal(summarizeHealth({ ...base, events: noReissue }).verdict, "INCONCLUSIVE_IRREGULAR_SESSION_REISSUE");
   assert.equal(summarizeHealth({ ...base, capturedAt: null, events: [] }).verdict, "INCONCLUSIVE_NO_DATA");
 });

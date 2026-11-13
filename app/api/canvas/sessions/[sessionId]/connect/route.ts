@@ -45,6 +45,17 @@ export async function POST(request: Request, context: { params: Promise<{ sessio
         }
         try { connection = await hostedBrowserProvider.interactiveConnect(providerSessionId); }
         catch (error) {
+          if (error instanceof BridgeError && error.code === "BROWSER_NAVIGATION_BLOCKED") {
+            // The blocked browser is already torn down (and tombstoned for 5 min).
+            // Forget its handle so the user's Retry provisions a fresh browser
+            // instead of replaying the same "blocked" answer.
+            const blockedId = providerSessionId;
+            await hostedBrowserProvider.terminate(blockedId).catch(() => undefined);
+            await hostedSessionStore.updateForOwner(hosted.id, authSession.userId, {
+              providerSessionId: "", state: "awaiting-login", lastError: "BROWSER_NAVIGATION_BLOCKED", interactiveAttemptId: hosted.interactiveAttemptId,
+            }).catch(() => null);
+            throw error;
+          }
           if (!(error instanceof BridgeError) || !["BROWSER_SESSION_NOT_FOUND", "BROWSER_HOST_ERROR"].includes(error.code)) throw error;
           // A container can remain technically running while Chromium, CDP, or
           // its viewer has failed. Retire that unusable handle once, then let

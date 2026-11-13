@@ -58,3 +58,11 @@ next-env.d.ts
 /.viewer-acceptance.png
 /test-results/
 /playwright-report/
+
+# developer's own Grove owner id (dev scripts + ops-psql.sh act only as this user)
+.dev-owner
+
+# local-only
+.canvas-mode
+*.bak
+*.bak-*

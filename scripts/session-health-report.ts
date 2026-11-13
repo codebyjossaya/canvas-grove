@@ -41,7 +41,7 @@ async function main() {
           `  health rows:            ${report.events}`,
           `  canvas calls:           ${report.calls}  ok=${report.ok} auth_required=${report.authRequired} error=${report.errors}`,
           `  session-cookie rotations (rows): ${report.rotationCount}  last=${iso(report.lastRotationAt)}`,
-          `  _normandy_session reissue rate: ${report.sessionCookieReissueRate === null ? "-" : `${(report.sessionCookieReissueRate * 100).toFixed(1)}% of calls`}  longest gap=${duration(report.longestReissueGapMs)}`,
+          `  session-cookie reissue rate: ${report.sessionCookieReissueRate === null ? "-" : `${(report.sessionCookieReissueRate * 100).toFixed(1)}% of calls`}  longest gap=${duration(report.longestReissueGapMs)}`,
           `  remember-me cookie:     present=${report.rememberCookiePresent} used=${report.rememberCookieUsed}`,
           `  longest gap between ok: ${duration(report.longestOkGapMs)}`,
           `  last ok:                ${iso(report.lastOkAt)}`,

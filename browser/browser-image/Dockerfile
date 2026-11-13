@@ -13,6 +13,11 @@ RUN chmod 0555 /usr/local/bin/start-browser
 # Enterprise policy (root-owned, read-only to the browser user): the hosted
 # browser must never offer to save, autofill or leak-check credentials, and must
 # not show sign-in/sync/translate prompts over institution login pages.
+# It also keeps keyboard-reachable browser UI inert: DevTools/view-source/file URLs
+# are blocklisted, a new tab/window opens on chrome://version/ (which the relay
+# guard closes), and incognito/guest/downloads/printing are off. Do NOT set
+# DeveloperToolsAvailability=2: it also blocks CDP page attach, which breaks
+# sign-in detection. The viewer drops browser-UI shortcuts before they get here.
 COPY chromium-policy.json /etc/chromium/policies/managed/canvas-grove.json
 RUN chmod 0444 /etc/chromium/policies/managed/canvas-grove.json
 

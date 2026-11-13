@@ -20,3 +20,9 @@ test("DNS validation covers private, link-local, CGNAT, documentation, multicast
   assert.match(source, /egress proxy[\s\S]*every CONNECT/);
   assert.match(policy, /\^::ffff:/);
 });
+
+test("relay closes Chromium UI tabs (chrome:/devtools:/view-source:) instead of killing the session, but still blocks other schemes", () => {
+  assert.match(source, /BROWSER_UI_SCHEMES=new Set\(\["chrome:","devtools:","chrome-untrusted:","view-source:"\]\)/);
+  assert.match(source, /BROWSER_UI_SCHEMES\.has\(parsed\.protocol\)[\s\S]{0,200}\/json\/close\/\$\{t\.id\}[\s\S]{0,200}continue;/);
+  assert.match(source, /parsed\.protocol!=="https:"\)\{[\s\S]{0,200}block\(session,undefined,"disallowed-scheme"\)/);
+});

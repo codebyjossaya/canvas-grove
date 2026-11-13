@@ -58,3 +58,41 @@ export function diffTextInput(previous, next) {
 
 /** Sentinel content so a BackSpace on an "empty" field is still observable as a deletion. */
 export const SOFT_KEYBOARD_SENTINEL = "_".repeat(64);
+
+// ---- Browser-UI shortcuts are never forwarded to the hosted Chromium.
+// While the remote surface has focus every key goes to the remote browser,
+// whose own UI (omnibox, new windows/tabs, DevTools, find bar, history,
+// downloads, zoom bubble, task manager) can cover the sign-in page and swallow
+// every click, which looks like a frozen stream. Editing and text keys pass.
+// Judged on event.code (layout-independent) plus modifiers; Ctrl+Alt (AltGr)
+// and Option/Alt combinations that produce a character are text and pass.
+const CTRL_TEXT_LETTERS = new Set(["KeyA", "KeyC", "KeyV", "KeyX", "KeyZ", "KeyY", "KeyR"]);
+const CTRL_SHIFT_TEXT_LETTERS = new Set(["KeyZ", "KeyV"]);
+const CTRL_UI_KEYS = new Set(["Tab", "PageUp", "PageDown", "Equal", "Minus", "NumpadAdd", "NumpadSubtract", "Digit0", "Numpad0"]);
+const ALT_UI_LETTERS = new Set(["KeyD", "KeyE", "KeyF"]);
+const ALT_SHIFT_UI_LETTERS = new Set(["KeyI", "KeyT", "KeyA"]);
+
+export function isBrowserUiShortcut(event) {
+  if (!event || typeof event.code !== "string") return false;
+  const code = event.code;
+  // Function keys in any combination (F6 omnibox, F7 caret browsing, F10 menu,
+  // F11 fullscreen, F12 DevTools, Alt+F4 / Ctrl+F4 close) except F5 reload.
+  if (/^F(?:[1-9]|1\d|2[0-4])$/.test(code)) return code !== "F5";
+  if (event.metaKey) return false; // macOS Cmd maps to Super on Linux: no Chromium shortcuts
+  if (event.ctrlKey && event.altKey) return false; // AltGr text input
+  if (event.ctrlKey) {
+    if (/^Key[A-Z]$/.test(code)) return event.shiftKey ? !CTRL_SHIFT_TEXT_LETTERS.has(code) : !CTRL_TEXT_LETTERS.has(code);
+    if (/^(?:Digit|Numpad)[1-9]$/.test(code)) return true; // switch tab
+    if (CTRL_UI_KEYS.has(code)) return true; // tab cycling, zoom
+    if (code === "Delete" && event.shiftKey) return true; // clear browsing data
+    return false;
+  }
+  if (event.altKey) {
+    if (code === "Home") return true; // home page in the sign-in tab
+    const letters = event.shiftKey ? ALT_SHIFT_UI_LETTERS : ALT_UI_LETTERS;
+    // Only a plain letter is a shortcut; Option+letter producing a symbol is text.
+    return letters.has(code) && typeof event.key === "string" && event.key.toLowerCase() === code.slice(3).toLowerCase();
+  }
+  if (event.shiftKey && code === "Escape") return true; // task manager
+  return false;
+}

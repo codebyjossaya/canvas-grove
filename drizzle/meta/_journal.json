@@ -78,6 +78,13 @@
       "when": 1794225600000,
       "tag": "0010_canvas_session_health",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1794232800000,
+      "tag": "0011_page_keepalive_kind",
+      "breakpoints": true
     }
   ]
 }

@@ -1,7 +1,7 @@
 import { createHash, createHmac, randomBytes } from "node:crypto";
 import process from "node:process";
 import postgres from "postgres";
-import { backoffMs, deterministicJitterMs, syncPolicies, type SyncKind } from "../lib/sync/catalog";
+import { backoffMs, deterministicJitterMs, isAssignmentEvent, QUIZ_ATTEMPT_RESYNC_SECONDS, QUIZ_DEADLINE_RESYNC_SECONDS, isQuizHot, syncPolicies, type SyncKind } from "../lib/sync/catalog";
 import { executeCanvasSyncJob } from "../lib/sync/executor";
 import type { EncryptedBrowserState, HostedBrowserProvider } from "../lib/bridge/hosted-browser";
 import { SelfHostedChromiumProvider } from "../lib/bridge/providers/self-hosted";
@@ -11,7 +11,7 @@ import { monitorRepairAction } from "../lib/sync/monitor-repair";
 import { restrictionReason, safeQuizHtml } from "../lib/quizzes/contracts";
 import { completeAuthenticationTx, releaseLoginBrowser } from "../lib/bridge/complete-authentication";
 import { CanvasSessionClient } from "../lib/canvas/session-client";
-import { healthEventRow, keepaliveDue, keepaliveMinutes, type HealthKind } from "../lib/canvas/session-health";
+import { healthEventRow, keepaliveDue, keepaliveMinutes, nextKeepaliveKind, pageKeepaliveEnabled, type HealthKind } from "../lib/canvas/session-health";
 import { insertHealthEvent, sqlEncryptedStateStore } from "../lib/canvas/session-store-sql";
 import { browserLostRecoveryAction, recoveryOutcome, STRANDED_FAILURE_CODE } from "../lib/canvas/session-recovery";
 
@@ -29,9 +29,13 @@ let nextSessionHealthAt = 0;
 // Keepalive: canvas-lms slides `expire_after` per request (default 1 day,
 // institution minimum 20 minutes), so 10 minutes keeps any configured timeout alive.
 const KEEPALIVE_MINUTES = keepaliveMinutes(process.env.CANVAS_KEEPALIVE_MINUTES);
+const PAGE_KEEPALIVE = pageKeepaliveEnabled(process.env.CANVAS_PAGE_KEEPALIVE);
 // While a user is mid sign-in, re-check quickly so completion is noticed fast
 // (the /confirm route is the primary fast path; this monitor is the backstop).
 const INTERACTIVE_RECHECK_MS = 1500;
+// Auth monitors run in their own slots: long sync jobs filling every worker slot
+// must never delay completing a sign-in the user is waiting on.
+const MONITOR_CONCURRENCY = 2;
 let lastMonitorClaimAt = 0;
 if ((process.env.HOSTED_BROWSER_PROVIDER || "self-hosted") !== "self-hosted") throw new Error("The durable auth monitor currently requires the self-hosted browser provider");
 const hostedBrowserProvider: HostedBrowserProvider = new SelfHostedChromiumProvider();
@@ -151,6 +155,22 @@ async function persistCourseContent(tx: postgres.TransactionSql, job: Job, value
   }
 }
 
+/** Upsert the student's own submission rows for assignments Grove already knows (never creates assignments). */
+async function persistOwnSubmissions(tx: postgres.TransactionSql, job: Job, courses: CanvasRecord[]) {
+  for (const course of courses) {
+    const canvasCourseId = textValue(course.courseCanvasId); if (!canvasCourseId) continue;
+    const local = await tx<{ id: string; canvas_assignment_id: string }[]>`select a.id,a.canvas_assignment_id from assignments a join courses c on c.owner_id=a.owner_id and c.id=a.course_id
+      where a.owner_id=${job.ownerId} and c.canvas_account_id=${job.canvasAccountId} and c.canvas_course_id=${canvasCourseId} and a.deleted_at is null`;
+    const byCanvasId = new Map(local.map((row) => [row.canvas_assignment_id, row.id]));
+    for (const submission of records(course.rows)) {
+      const localAssignmentId = byCanvasId.get(textValue(submission.assignment_id) ?? ""); if (!localAssignmentId) continue;
+      await tx`insert into submissions(owner_id,assignment_id,canvas_submission_id,attempt,state,submitted_at,graded_at,score,grade,late,missing,excused,source_updated_at,synced_at,source_payload,updated_at)
+        values(${job.ownerId},${localAssignmentId},${textValue(submission.id)},${numberValue(submission.attempt) ?? 0},${textValue(submission.workflow_state)},${dateValue(submission.submitted_at)},${dateValue(submission.graded_at)},${numberValue(submission.score)},${textValue(submission.grade)},${booleanValue(submission.late)},${booleanValue(submission.missing)},${booleanValue(submission.excused)},${dateValue(submission.updated_at)},now(),${tx.json(submission)},now())
+        on conflict(assignment_id,attempt) do update set canvas_submission_id=excluded.canvas_submission_id,state=excluded.state,submitted_at=excluded.submitted_at,graded_at=excluded.graded_at,score=excluded.score,grade=excluded.grade,late=excluded.late,missing=excluded.missing,excused=excluded.excused,source_updated_at=excluded.source_updated_at,synced_at=now(),source_payload=excluded.source_payload,updated_at=now()`;
+    }
+  }
+}
+
 async function persistSyncRecords(tx: postgres.TransactionSql, job: Job, value: unknown) {
   const items = records(value);
   if (job.kind === "course_content") {
@@ -210,7 +230,16 @@ async function persistSyncRecords(tx: postgres.TransactionSql, job: Job, value: 
     await tx`update courses set favorite=false,updated_at=now() where owner_id=${job.ownerId} and canvas_account_id=${job.canvasAccountId} and deleted_at is null`;
     for (const item of items) await upsertCourse(tx, job, { ...item, is_favorite: true });
   } else if (job.kind === "assignments") {
+    // Payload: { events: upcoming_events[], submissions: [{ courseCanvasId, rows }] } (legacy: bare events array).
+    const payload = Array.isArray(value) ? { events: value, submissions: [] } : object(value);
+    const items = records(payload.events);
+    await persistOwnSubmissions(tx, job, records(payload.submissions));
+    // upcoming_events mixes assignments with plain calendar events (type "event").
+    // Calendar events are not assignments: storing them used calendar-event ids as
+    // canvas_assignment_id and showed phantom assignments. Retire any stored earlier.
+    await tx`update assignments set deleted_at=now(),updated_at=now() where owner_id=${job.ownerId} and deleted_at is null and assignment_group_id is null and source_payload->>'type'='event'`;
     for (const event of items) {
+      if (!isAssignmentEvent(event)) continue;
       const assignment = Object.keys(object(event.assignment)).length ? object(event.assignment) : event;
       const canvasAssignmentId = textValue(assignment.id) ?? textValue(event.id);
       const courseId = await ensureCourse(tx, job, { ...event, course_id: assignment.course_id ?? event.course_id });
@@ -305,7 +334,9 @@ async function bootstrapPolicies(ownerId: string) {
       const policy = syncPolicies[kind];
       await tx`insert into sync_policies(owner_id,canvas_account_id,resource_type,interval_seconds,freshness_seconds,priority,next_run_at)
         values(${ownerId},${account.id},${kind},${Math.round(policy.intervalMs / 1000)},${Math.round(policy.staleAfterMs / 1000)},${policy.priority},now())
-        on conflict(canvas_account_id,resource_type,scope_key) do nothing`;
+        on conflict(canvas_account_id,resource_type,scope_key) do update set interval_seconds=excluded.interval_seconds,freshness_seconds=excluded.freshness_seconds,priority=excluded.priority,
+          next_run_at=least(sync_policies.next_run_at,now()+(excluded.interval_seconds*interval '1 second')),updated_at=now()
+        where (sync_policies.interval_seconds,sync_policies.freshness_seconds,sync_policies.priority) is distinct from (excluded.interval_seconds,excluded.freshness_seconds,excluded.priority)`;
     }
   });
 }
@@ -519,10 +550,17 @@ async function complete(job: Job, records: unknown) {
       // A short, bounded cadence near a deadline (or while an attempt is
       // active) keeps the DB-first hub warm without polling every quiz at that
       // rate for the rest of the term.
-      await tx`update sync_policies set next_run_at=least(next_run_at,now()+interval '60 seconds'),updated_at=now()
-        where owner_id=${job.ownerId} and canvas_account_id=${job.canvasAccountId} and resource_type='quizzes'
-          and (exists(select 1 from quizzes q where q.owner_id=${job.ownerId} and q.canvas_account_id=${job.canvasAccountId} and q.deleted_at is null and q.due_at between now() and now()+interval '24 hours')
-            or exists(select 1 from quiz_attempts qa join quizzes q on q.owner_id=qa.owner_id and q.id=qa.quiz_id where qa.owner_id=${job.ownerId} and q.canvas_account_id=${job.canvasAccountId} and qa.finished_at is null and qa.workflow_state not in ('complete','pending_review','submitted','graded')))`;
+      // Each sweep is ~140 Canvas requests, so the 60s path is reserved for an
+      // open attempt; an imminent deadline gets a 5-minute cadence.
+      const [hot] = await tx<{ attempt: boolean; deadline: boolean }[]>`select
+          exists(select 1 from quiz_attempts qa join quizzes q on q.owner_id=qa.owner_id and q.id=qa.quiz_id where qa.owner_id=${job.ownerId} and q.canvas_account_id=${job.canvasAccountId} and qa.finished_at is null and qa.workflow_state='untaken' and qa.started_at is not null and coalesce(qa.end_at, qa.started_at + interval '3 hours') >= now()) attempt,
+          false deadline`;
+      const dated = await tx<{ due_at: Date | null; unlock_at: Date | null; lock_at: Date | null }[]>`select due_at,unlock_at,lock_at from quizzes q where q.owner_id=${job.ownerId} and q.canvas_account_id=${job.canvasAccountId} and q.deleted_at is null
+        and greatest(q.due_at,q.unlock_at,q.lock_at) >= now()`;
+      const deadlineHot = dated.some((q) => isQuizHot({ dueAt: q.due_at, unlockAt: q.unlock_at, lockAt: q.lock_at }));
+      const hotSeconds = hot?.attempt ? QUIZ_ATTEMPT_RESYNC_SECONDS : deadlineHot ? QUIZ_DEADLINE_RESYNC_SECONDS : null;
+      if (hotSeconds !== null) await tx`update sync_policies set next_run_at=least(next_run_at,now()+(${hotSeconds}*interval '1 second')),updated_at=now()
+        where owner_id=${job.ownerId} and canvas_account_id=${job.canvasAccountId} and resource_type='quizzes'`;
     }
   });
 }
@@ -572,6 +610,17 @@ async function markCanvasSessionExpired(tx: postgres.TransactionSql, ownerId: st
   if (updated.length) console.log(JSON.stringify({ event: "canvas_session_expired", session: hostedSessionId.slice(0, 8) }));
 }
 
+/** GET / (HTML dashboard page) with the stored cookies; logs a `page-keepalive` health event. */
+async function touchSessionPage(ownerId: string, target: ProbeTarget): Promise<ProbeResult & { touch?: { status: number; sessionCookieReissued: boolean; rotatedNames: string[] } }> {
+  const client = canvasClient(ownerId, target.id, target.canvas_origin);
+  try {
+    const touch = await client.touchSession();
+    return { ok: touch.status >= 200 && touch.status < 300 && !touch.authRequired, authRequired: touch.authRequired, touch };
+  } catch (error) {
+    return error instanceof BridgeError && error.code === "CANVAS_SESSION_EXPIRED" ? { ok: false, authRequired: true } : "unreachable";
+  } finally { await recordHealth(ownerId, target.id, client, "page-keepalive"); }
+}
+
 /** GET /api/v1/users/self with the stored cookies. An unreadable/missing jar counts as an auth rejection. */
 async function probeSession(ownerId: string, target: ProbeTarget, kind: HealthKind): Promise<ProbeResult> {
   const client = canvasClient(ownerId, target.id, target.canvas_origin, { requireActive: kind !== "restore-check" });
@@ -585,15 +634,17 @@ async function probeSession(ownerId: string, target: ProbeTarget, kind: HealthKi
 
 /** Keep each active session's sliding Canvas expiry alive when nothing else has called Canvas recently. */
 async function runKeepalives(ownerId: string) {
-  const sessions = await tenant(ownerId, (tx) => tx<(ProbeTarget & { last_call_at: Date | null })[]>`
+  const sessions = await tenant(ownerId, (tx) => tx<(ProbeTarget & { last_call_at: Date | null; last_keepalive_kind: string | null })[]>`
     select s.id,s.canvas_account_id,p.canvas_origin,
-      (select max(e.at) from canvas_session_health_events e where e.owner_id=s.owner_id and e.hosted_session_id=s.id) last_call_at
+      (select max(e.at) from canvas_session_health_events e where e.owner_id=s.owner_id and e.hosted_session_id=s.id) last_call_at,
+      (select e.kind from canvas_session_health_events e where e.owner_id=s.owner_id and e.hosted_session_id=s.id and e.kind in ('keepalive','page-keepalive') order by e.at desc limit 1) last_keepalive_kind
     from hosted_browser_sessions s join hosted_browser_profiles p on p.owner_id=s.owner_id and p.id=s.profile_id
     where s.owner_id=${ownerId} and s.status='active' and s.revoked_at is null and s.encrypted_state_nonce is not null
       and not exists(select 1 from sync_jobs j where j.owner_id=s.owner_id and j.hosted_session_id=s.id and j.status in ('leased','running'))`);
   for (const session of sessions) {
     if (!keepaliveDue(session.last_call_at, new Date(), KEEPALIVE_MINUTES)) continue;
-    const probe = await probeSession(ownerId, session, "keepalive");
+    const kind = nextKeepaliveKind(session.last_keepalive_kind, PAGE_KEEPALIVE);
+    const probe = kind === "page-keepalive" ? await touchSessionPage(ownerId, session) : await probeSession(ownerId, session, "keepalive");
     if (probe !== "unreachable" && probe.authRequired) await tenant(ownerId, (tx) => markCanvasSessionExpired(tx, ownerId, session.id, session.canvas_account_id));
     else if (probe !== "unreachable" && probe.ok) await tenant(ownerId, (tx) => tx`update hosted_browser_sessions set last_auth_check_at=now() where owner_id=${ownerId} and id=${session.id} and status='active'`);
   }
@@ -637,7 +688,7 @@ async function runJob(job: Job) {
   const client = canvasClient(job.ownerId, job.hostedSessionId, job.canvasOrigin);
   try {
     await heartbeat(job);
-    const result = await executeCanvasSyncJob({ kind: job.kind, api: client });
+    const result = await executeCanvasSyncJob({ kind: job.kind, api: client, scope: job.ownerId, onBreakdown: (breakdown) => console.log(JSON.stringify({ event: "canvas_error_breakdown", kind: job.kind, session: job.hostedSessionId.slice(0, 8), breakdown })) });
     if (result.ok) await complete(job, result.records);
     else await fail(job, result.authExpired ? "CANVAS_SESSION_EXPIRED" : result.rateLimited ? "RATE_LIMITED" : `HTTP_${result.status}`, `Canvas sync returned HTTP ${result.status}`, { authExpired: result.authExpired, retryAfterMs: result.retryAfterMs });
   } catch (error) {
@@ -652,7 +703,29 @@ async function runJob(job: Job) {
 async function main() {
   console.log(`sync-worker ${workerId} started (concurrency=${concurrency})`);
   const active = new Set<Promise<void>>();
+  const monitors = new Set<Promise<void>>();
+  let loopFailures = 0;
   while (!stopping) {
+    // One loop iteration must never end the worker: a transient DB error (e.g.
+    // postgres not accepting connections yet after a host reboot, where Docker
+    // ignores depends_on ordering) used to reject main() and, under `tsx watch`,
+    // leave the container "Up" with no worker running. Back off and retry instead.
+    try {
+      await loopOnce(active, monitors);
+      if (loopFailures) console.log(`sync-worker loop recovered after ${loopFailures} failure(s)`);
+      loopFailures = 0;
+    } catch (error) {
+      loopFailures += 1;
+      const delayMs = Math.min(60_000, 2_000 * 2 ** Math.min(loopFailures - 1, 5));
+      console.error(`sync-worker loop failed (${loopFailures}), retrying in ${delayMs}ms:`, error instanceof Error ? error.message : "unknown");
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+  await Promise.allSettled([...active, ...monitors]); await sql.end({ timeout: 5 });
+}
+
+async function loopOnce(active: Set<Promise<void>>, monitors: Set<Promise<void>>) {
+  {
     const owners = await sql<{ id: string }[]>`select id from users where status='active' order by id`;
     if (Date.now() >= nextReconcileAt) {
       nextReconcileAt = Date.now() + 30_000;
@@ -669,17 +742,20 @@ async function main() {
     }
     for (const owner of owners) { await bootstrapAuthMonitors(owner.id); await bootstrapPolicies(owner.id); await scheduleDue(owner.id); }
     for (const owner of owners) {
-      if (active.size >= concurrency) break;
-      const monitor = await claimAuthMonitor(owner.id);
-      if (monitor) { lastMonitorClaimAt = Date.now(); const task = runAuthMonitor(monitor).finally(() => active.delete(task)); active.add(task); continue; }
+      if (monitors.size < MONITOR_CONCURRENCY) {
+        const monitor = await claimAuthMonitor(owner.id);
+        if (monitor) { lastMonitorClaimAt = Date.now(); const task = runAuthMonitor(monitor).catch((error) => console.error("auth-monitor task failed:", error instanceof Error ? error.message : "unknown")).finally(() => monitors.delete(task)); monitors.add(task); continue; }
+      }
+      if (active.size >= concurrency) continue;
       const job = await claimNext(owner.id);
-      if (job) { const task = runJob(job).finally(() => active.delete(task)); active.add(task); }
+      if (job) { const task = runJob(job).catch((error) => console.error(`sync job ${job.kind} failed outside its handler:`, error instanceof Error ? error.message : "unknown")).finally(() => active.delete(task)); active.add(task); }
     }
     const interactiveLive = Date.now() - lastMonitorClaimAt < 15_000;
     await new Promise((resolve) => setTimeout(resolve, interactiveLive ? Math.min(pollMs, 1000) : pollMs));
   }
-  await Promise.allSettled(active); await sql.end({ timeout: 5 });
 }
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) process.on(signal, () => { stopping = true; });
-void main().catch((error) => { console.error("sync-worker stopped:", error instanceof Error ? error.message : error); process.exitCode = 1; });
+// Exit for real on a fatal error: open postgres connections would otherwise keep
+// the process alive doing nothing, so the restart policy never kicks in.
+void main().then(() => process.exit(0), (error) => { console.error("sync-worker stopped:", error instanceof Error ? error.message : error); process.exit(1); });

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { beginFavoriteChange, finishFavoriteChange } from "@/lib/courses/favorites";
+import { Icon } from "./icons";
 
 export function CourseFavoriteToggle({ courseId, initialActive, compact = false }: { courseId: string; initialActive: boolean; compact?: boolean }) {
   const router = useRouter();
@@ -28,7 +29,7 @@ export function CourseFavoriteToggle({ courseId, initialActive, compact = false 
     } finally { setBusy(false); }
   }
   return <div className={`favorite-control ${compact ? "compact" : ""}`} onClick={(event) => event.preventDefault()}>
-    <button type="button" role="switch" aria-checked={active} aria-label={active ? "Mark course inactive" : "Mark course active"} disabled={busy} onClick={() => void toggle()}><span aria-hidden="true"/>{busy ? "Saving…" : active ? "Active" : "Inactive"}</button>
+    <button type="button" role="switch" aria-checked={active} aria-label={active ? "Active course. Mark inactive" : "Inactive course. Mark active"} title={active ? "Active in Canvas (favorite). Click to mark inactive" : "Mark active (favorite in Canvas)"} disabled={busy} aria-busy={busy} onClick={() => void toggle()}><Icon name="star" />{compact ? null : busy ? "Saving…" : active ? "Active" : "Inactive"}</button>
     {error && <small role="alert">{error}</small>}
   </div>;
 }

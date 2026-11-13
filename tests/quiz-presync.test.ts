@@ -40,5 +40,7 @@ test("quiz hub is DB-first stale-while-revalidate", () => {
   assert.match(worker, /job\.kind === "quizzes"/);
   assert.match(worker, /quiz_attempts/);
   assert.doesNotMatch(worker, /validation_token/);
-  assert.match(catalog, /quizzes: \{ intervalMs: 5 \* 60_000/);
+  assert.match(catalog, /quizzes: \{ intervalMs: 15 \* 60_000/);
+  assert.match(catalog, /QUIZ_ATTEMPT_RESYNC_SECONDS = 60;/);
+  assert.doesNotMatch(worker, /24 hours/, "a 24h deadline window kept quizzes on a 60s sweep all day");
 });

@@ -11,3 +11,7 @@ test-results
 playwright-report
 e2e/.theme-test-results
 .docker-build-config
+
+# jc-homelab sidecar state (root-owned)
+tailscale
+.canvas-mode

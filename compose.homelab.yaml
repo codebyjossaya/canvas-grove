@@ -1,0 +1,29 @@
+# jc-homelab override: publish over the tailnet as https://canvas-grove.tail8dc4e4.ts.net
+# via a Tailscale sidecar (same pattern as the other homelab apps).
+services:
+  lan-gateway:
+    ports: !override
+      - "127.0.0.1:${LAN_PORT:-3000}:8080"
+  tailscale:
+    image: ghcr.io/tailscale/tailscale:v1.74.1
+    restart: unless-stopped
+    hostname: canvas-grove
+    # TS_AUTHKEY lives outside the source tree (one line: TS_AUTHKEY=tskey-auth-...).
+    # Without a key, containerboot's `tailscale up` times out after 60s, the container
+    # restarts with a fresh nodekey, and every interactive login URL dies within a minute.
+    env_file:
+      - path: ${HOME}/apps/canvas-grove-tailscale/ts.env
+        required: false
+    environment:
+      TS_HOSTNAME: canvas-grove
+      TS_STATE_DIR: /state
+      TS_SERVE_CONFIG: /config/serve.json
+      TS_USERSPACE: "true"
+      TS_AUTH_ONCE: "true"
+    volumes:
+      - ${HOME}/apps/canvas-grove-tailscale/config:/config:ro
+      - ${HOME}/apps/canvas-grove-tailscale/state:/state
+    depends_on:
+      lan-gateway:
+        condition: service_healthy
+    networks: [backend]

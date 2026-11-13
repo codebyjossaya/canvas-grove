@@ -10,13 +10,24 @@ import { isPublicAddress } from "@/lib/canvas/network-policy";
 
 type Handle = { id: string; canvasOrigin: string; authHostRules: string[]; loginPath: CanvasLoginPath; display?: DisplaySize };
 
-async function isAllowedPublicInstitutionUrl(value: string, canvasOrigin: string, authHostRules: string[]): Promise<boolean> {
-  if (!isAllowedInstitutionUrl(value, canvasOrigin, authHostRules)) return false;
+/**
+ * "allowed": policy + public DNS. "blocked": policy violation or a private DNS
+ * answer. "pending": DNS momentarily unavailable — keep waiting, never report a
+ * transient resolver hiccup as a blocked redirect.
+ */
+async function classifyInstitutionUrl(value: string, canvasOrigin: string, authHostRules: string[]): Promise<"allowed" | "blocked" | "pending"> {
+  if (!isAllowedInstitutionUrl(value, canvasOrigin, authHostRules)) return "blocked";
   try {
     const addresses = await lookup(new URL(value).hostname, { all: true, verbatim: true });
-    return addresses.length > 0 && addresses.every(({ address }) => isPublicAddress(address));
-  } catch { return false; }
+    if (!addresses.length) return "pending";
+    return addresses.every(({ address }) => isPublicAddress(address)) ? "allowed" : "blocked";
+  } catch { return "pending"; }
 }
+async function isAllowedPublicInstitutionUrl(value: string, canvasOrigin: string, authHostRules: string[]): Promise<boolean> {
+  return await classifyInstitutionUrl(value, canvasOrigin, authHostRules) === "allowed";
+}
+/** Blank/popup bootstrap tabs and Chromium's own failed-load page render nothing remote. */
+const inertPageUrl = (url: string) => url === "" || url === "about:blank" || /^chrome-error:\/\/chromewebdata\/?$/i.test(url);
 
 function blockedRedirect(value: string): BridgeError {
   let blockedHost: string | undefined;
@@ -53,7 +64,10 @@ async function gateway<T>(method: string, path: string, value?: unknown): Promis
     if (response.status === 401) throw new BridgeError("BROWSER_HOST_AUTH", "The browser host rejected the request.");
     if (response.status === 404) throw new BridgeError("BROWSER_SESSION_NOT_FOUND", "The secure browser session no longer exists.", 404);
     if (response.status === 429) throw new BridgeError("BROWSER_HOST_CAPACITY", "The browser host is at capacity. Try again shortly.", 429);
-    if (result.code === "NAVIGATION_BLOCKED") throw new BridgeError("BROWSER_NAVIGATION_BLOCKED", "The sign-in redirect was blocked for safety.", 400);
+    if (result.code === "NAVIGATION_BLOCKED") {
+      const host = typeof (result as { blockedHost?: unknown }).blockedHost === "string" ? (result as { blockedHost: string }).blockedHost : undefined;
+      throw host ? blockedRedirect(`https://${host}/`) : new BridgeError("BROWSER_NAVIGATION_BLOCKED", "The sign-in redirect was blocked for safety.", 400);
+    }
     throw new BridgeError("BROWSER_HOST_ERROR", "The secure browser could not complete the request.");
   }
   return result as T;
@@ -104,15 +118,16 @@ async function navigateForInteractiveLogin(page: Page, target: string, handle: H
   const deadline = Date.now() + 15_000;
   while (Date.now() < deadline) {
     const pages = context.pages();
-    const candidates = pages.filter((candidate) => !["", "about:blank"].includes(candidate.url()));
+    const candidates = pages.filter((candidate) => !inertPageUrl(candidate.url()));
+    const verdicts = new Map<string, "allowed" | "blocked" | "pending">();
     for (const candidate of candidates) {
-      if (!await isAllowedPublicInstitutionUrl(candidate.url(), handle.canvasOrigin, handle.authHostRules)) {
-        throw blockedRedirect(candidate.url());
-      }
+      const verdict = await classifyInstitutionUrl(candidate.url(), handle.canvasOrigin, handle.authHostRules);
+      if (verdict === "blocked") throw blockedRedirect(candidate.url());
+      verdicts.set(candidate.url(), verdict);
     }
     selected = candidates.at(-1) ?? selected;
     const current = selected.url();
-    if (await isAllowedPublicInstitutionUrl(current, handle.canvasOrigin, handle.authHostRules) && current === previous) stableSamples += 1;
+    if (verdicts.get(current) === "allowed" && current === previous) stableSamples += 1;
     else stableSamples = 0;
     previous = current;
     if (stableSamples >= 2) {
@@ -124,6 +139,8 @@ async function navigateForInteractiveLogin(page: Page, target: string, handle: H
   if (navigationAborted && await isAllowedPublicInstitutionUrl(selected.url(), handle.canvasOrigin, handle.authHostRules)) return;
   throw new BridgeError("BROWSER_HOST_ERROR", "The secure browser could not reach the sign-in page.");
 }
+
+type ReleaseOptions = { reason?: "signed-in" };
 
 export class SelfHostedChromiumProvider implements HostedBrowserProvider {
   async provision(input: { ownerId: string; canvasOrigin: string; authHostRules: string[]; loginPath: CanvasLoginPath; display?: DisplaySize; encryptedState?: EncryptedBrowserState }) {
@@ -187,7 +204,10 @@ export class SelfHostedChromiumProvider implements HostedBrowserProvider {
     try {
       return await withBrowser(handle.id, async (_browser, initialPage) => {
         const pages = initialPage.context().pages();
-        const page = pages.find((candidate) => isAllowedInstitutionUrl(candidate.url(), handle.canvasOrigin, handle.authHostRules));
+        // Prefer the page that is on Canvas: an IdP tab or popup that is still
+        // open must not hide a landed sign-in ("awaiting-login" forever).
+        const allowed = pages.filter((candidate) => isAllowedInstitutionUrl(candidate.url(), handle.canvasOrigin, handle.authHostRules));
+        const page = allowed.find((candidate) => { try { return new URL(candidate.url()).origin === handle.canvasOrigin; } catch { return false; } }) ?? allowed[0];
         // A running container with no committed, allowlisted renderer is not a
         // normal "awaiting login" state. It is the observable signature of a
         // dead renderer/network service and must be repaired by the durable
@@ -221,17 +241,18 @@ export class SelfHostedChromiumProvider implements HostedBrowserProvider {
       }
     });
   }
-  async relinquishInteractive(value: string) {
+  async relinquishInteractive(value: string, options?: ReleaseOptions) {
     const handle = decode(value);
-    await gateway("POST", `/v1/sessions/${encodeURIComponent(handle.id)}/revoke-live`);
+    // reason "signed-in" lets the open viewer show success instead of a disconnect.
+    await gateway("POST", `/v1/sessions/${encodeURIComponent(handle.id)}/revoke-live`, options?.reason ? { reason: options.reason } : undefined);
     return { providerSessionId: value };
   }
   async snapshotEncrypted(value: string, ownerId: string) {
     const handle = decode(value);
     return withBrowser(handle.id, async (browser) => envelopeEncryptBrowserState(await browser.contexts()[0].storageState(), ownerId));
   }
-  async terminate(value: string) {
+  async terminate(value: string, options?: ReleaseOptions) {
     const handle = decode(value);
-    await gateway("DELETE", `/v1/sessions/${encodeURIComponent(handle.id)}`);
+    await gateway("DELETE", `/v1/sessions/${encodeURIComponent(handle.id)}`, options?.reason ? { reason: options.reason } : undefined);
   }
 }

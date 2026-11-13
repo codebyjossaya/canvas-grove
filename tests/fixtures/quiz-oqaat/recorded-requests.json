@@ -1,0 +1,1356 @@
+[
+ {
+  "method": "POST",
+  "url": "/courses/565820/quizzes/1632424/take?user_id=1000001",
+  "status": 302,
+  "reqContentType": "application/x-www-form-urlencoded",
+  "sent": [
+   [
+    "_method",
+    "post"
+   ],
+   [
+    "authenticity_token",
+    "<redacted>"
+   ]
+  ],
+  "resContentType": "text/html; charset=utf-8",
+  "redirectTo": "/courses/565820/quizzes/1632424/take"
+ },
+ {
+  "method": "GET",
+  "url": "/courses/565820/quizzes/1632424/take",
+  "status": 200,
+  "resContentType": "text/html; charset=utf-8"
+ },
+ {
+  "method": "PUT",
+  "url": "/courses/565820/quizzes/1632424/submissions/backup?user_id=1000001",
+  "status": 200,
+  "reqContentType": "application/x-www-form-urlencoded; charset=UTF-8",
+  "sent": [
+   [
+    "utf8",
+    "<text len 1>"
+   ],
+   [
+    "authenticity_token",
+    "<redacted>"
+   ],
+   [
+    "attempt",
+    "1"
+   ],
+   [
+    "validation_token",
+    "<redacted>"
+   ],
+   [
+    "text_after_answers",
+    ""
+   ],
+   [
+    "question_text",
+    "<text len 453>"
+   ],
+   [
+    "question_24736633",
+    "471"
+   ],
+   [
+    "last_question_id",
+    "24736633"
+   ],
+   [
+    "question_24736633_marked",
+    ""
+   ]
+  ],
+  "resContentType": "application/json; charset=utf-8",
+  "received": {
+   "backup": true,
+   "end_at": "<text len 20>",
+   "time_left": 4918,
+   "hard_end_at": "<text len 20>",
+   "hard_time_left": 4918
+  }
+ },
+ {
+  "method": "POST",
+  "url": "/courses/565820/quizzes/1632424/submissions/50299517/record_answer?next_question_path=<text+len+55>&user_id=1000001",
+  "status": 302,
+  "reqContentType": "application/x-www-form-urlencoded",
+  "sent": [
+   [
+    "utf8",
+    "<text len 1>"
+   ],
+   [
+    "authenticity_token",
+    "<redacted>"
+   ],
+   [
+    "attempt",
+    "1"
+   ],
+   [
+    "validation_token",
+    "<redacted>"
+   ],
+   [
+    "question_24736633",
+    "471"
+   ],
+   [
+    "last_question_id",
+    "24736633"
+   ]
+  ],
+  "resContentType": "text/html; charset=utf-8",
+  "redirectTo": "/courses/565820/quizzes/1632424/take/questions/24736649"
+ },
+ {
+  "method": "GET",
+  "url": "/courses/565820/quizzes/1632424/take/questions/24736649",
+  "status": 200,
+  "resContentType": "text/html; charset=utf-8"
+ },
+ {
+  "method": "PUT",
+  "url": "/courses/565820/quizzes/1632424/submissions/backup?user_id=1000001",
+  "status": 200,
+  "reqContentType": "application/x-www-form-urlencoded; charset=UTF-8",
+  "sent": [
+   [
+    "utf8",
+    "<text len 1>"
+   ],
+   [
+    "authenticity_token",
+    "<redacted>"
+   ],
+   [
+    "attempt",
+    "1"
+   ],
+   [
+    "validation_token",
+    "<redacted>"
+   ],
+   [
+    "text_after_answers",
+    ""
+   ],
+   [
+    "question_text",
+    "<text len 156>"
+   ],
+   [
+    "last_question_id",
+    "24736649"
+   ],
+   [
+    "question_24736649_marked",
+    ""
+   ]
+  ],
+  "resContentType": "application/json; charset=utf-8",
+  "received": {
+   "backup": true,
+   "end_at": "<text len 20>",
+   "time_left": 4891,
+   "hard_end_at": "<text len 20>",
+   "hard_time_left": 4891
+  }
+ },
+ {
+  "method": "PUT",
+  "url": "/courses/565820/quizzes/1632424/submissions/backup?user_id=1000001",
+  "status": 200,
+  "reqContentType": "application/x-www-form-urlencoded; charset=UTF-8",
+  "sent": [
+   [
+    "utf8",
+    "<text len 1>"
+   ],
+   [
+    "authenticity_token",
+    "<redacted>"
+   ],
+   [
+    "attempt",
+    "1"
+   ],
+   [
+    "validation_token",
+    "<redacted>"
+   ],
+   [
+    "text_after_answers",
+    ""
+   ],
+   [
+    "question_text",
+    "<text len 156>"
+   ],
+   [
+    "question_24736649",
+    "6142"
+   ],
+   [
+    "last_question_id",
+    "24736649"
+   ],
+   [
+    "question_24736649_marked",
+    ""
+   ]
+  ],
+  "resContentType": "application/json; charset=utf-8",
+  "received": {
+   "backup": true,
+   "end_at": "<text len 20>",
+   "time_left": 4886,
+   "hard_end_at": "<text len 20>",
+   "hard_time_left": 4886
+  }
+ },
+ {
+  "method": "POST",
+  "url": "/courses/565820/quizzes/1632424/submissions/50299517/record_answer?next_question_path=<text+len+55>&user_id=1000001",
+  "status": 302,
+  "reqContentType": "application/x-www-form-urlencoded",
+  "sent": [
+   [
+    "utf8",
+    "<text len 1>"
+   ],
+   [
+    "authenticity_token",
+    "<redacted>"
+   ],
+   [
+    "attempt",
+    "1"
+   ],
+   [
+    "validation_token",
+    "<redacted>"
+   ],
+   [
+    "question_24736649",
+    "6142"
+   ],
+   [
+    "last_question_id",
+    "24736649"
+   ]
+  ],
+  "resContentType": "text/html; charset=utf-8",
+  "redirectTo": "/courses/565820/quizzes/1632424/take/questions/24736619"
+ },
+ {
+  "method": "GET",
+  "url": "/courses/565820/quizzes/1632424/take/questions/24736619",
+  "status": 200,
+  "resContentType": "text/html; charset=utf-8"
+ },
+ {
+  "method": "PUT",
+  "url": "/courses/565820/quizzes/1632424/submissions/backup?user_id=1000001",
+  "status": 200,
+  "reqContentType": "application/x-www-form-urlencoded; charset=UTF-8",
+  "sent": [
+   [
+    "utf8",
+    "<text len 1>"
+   ],
+   [
+    "authenticity_token",
+    "<redacted>"
+   ],
+   [
+    "attempt",
+    "1"
+   ],
+   [
+    "validation_token",
+    "<redacted>"
+   ],
+   [
+    "text_after_answers",
+    ""
+   ],
+   [
+    "question_text",
+    "<text len 208>"
+   ],
+   [
+    "last_question_id",
+    "24736619"
+   ],
+   [
+    "question_24736619_marked",
+    ""
+   ]
+  ],
+  "resContentType": "application/json; charset=utf-8",
+  "received": {
+   "backup": true,
+   "end_at": "<text len 20>",
+   "time_left": 4868,
+   "hard_end_at": "<text len 20>",
+   "hard_time_left": 4868
+  }
+ },
+ {
+  "method": "PUT",
+  "url": "/courses/565820/quizzes/1632424/submissions/backup?user_id=1000001",
+  "status": 200,
+  "reqContentType": "application/x-www-form-urlencoded; charset=UTF-8",
+  "sent": [
+   [
+    "utf8",
+    "<text len 1>"
+   ],
+   [
+    "authenticity_token",
+    "<redacted>"
+   ],
+   [
+    "attempt",
+    "1"
+   ],
+   [
+    "validation_token",
+    "<redacted>"
+   ],
+   [
+    "text_after_answers",
+    ""
+   ],
+   [
+    "question_text",
+    "<text len 208>"
+   ],
+   [
+    "question_24736619",
+    "8784"
+   ],
+   [
+    "last_question_id",
+    "24736619"
+   ],
+   [
+    "question_24736619_marked",
+    ""
+   ]
+  ],
+  "resContentType": "application/json; charset=utf-8",
+  "received": {
+   "backup": true,
+   "end_at": "<text len 20>",
+   "time_left": 4709,
+   "hard_end_at": "<text len 20>",
+   "hard_time_left": 4709
+  }
+ },
+ {
+  "method": "POST",
+  "url": "/courses/565820/quizzes/1632424/submissions/50299517/record_answer?next_question_path=<text+len+55>&user_id=1000001",
+  "status": 302,
+  "reqContentType": "application/x-www-form-urlencoded",
+  "sent": [
+   [
+    "utf8",
+    "<text len 1>"
+   ],
+   [
+    "authenticity_token",
+    "<redacted>"
+   ],
+   [
+    "attempt",
+    "1"
+   ],
+   [
+    "validation_token",
+    "<redacted>"
+   ],
+   [
+    "question_24736619",
+    "8784"
+   ],
+   [
+    "last_question_id",
+    "24736619"
+   ]
+  ],
+  "resContentType": "text/html; charset=utf-8",
+  "redirectTo": "/courses/565820/quizzes/1632424/take/questions/24736656"
+ },
+ {
+  "method": "GET",
+  "url": "/courses/565820/quizzes/1632424/take/questions/24736656",
+  "status": 200,
+  "resContentType": "text/html; charset=utf-8"
+ },
+ {
+  "method": "PUT",
+  "url": "/courses/565820/quizzes/1632424/submissions/backup?user_id=1000001",
+  "status": 200,
+  "reqContentType": "application/x-www-form-urlencoded; charset=UTF-8",
+  "sent": [
+   [
+    "utf8",
+    "<text len 1>"
+   ],
+   [
+    "authenticity_token",
+    "<redacted>"
+   ],
+   [
+    "attempt",
+    "1"
+   ],
+   [
+    "validation_token",
+    "<redacted>"
+   ],
+   [
+    "text_after_answers",
+    ""
+   ],
+   [
+    "question_text",
+    "<text len 417>"
+   ],
+   [
+    "question_24736656",
+    "7231"
+   ],
+   [
+    "last_question_id",
+    "24736656"
+   ],
+   [
+    "question_24736656_marked",
+    ""
+   ]
+  ],
+  "resContentType": "application/json; charset=utf-8",
+  "received": {
+   "backup": true,
+   "end_at": "<text len 20>",
+   "time_left": 4697,
+   "hard_end_at": "<text len 20>",
+   "hard_time_left": 4697
+  }
+ },
+ {
+  "method": "POST",
+  "url": "/courses/565820/quizzes/1632424/submissions/50299517/record_answer?next_question_path=<text+len+55>&user_id=1000001",
+  "status": 302,
+  "reqContentType": "application/x-www-form-urlencoded",
+  "sent": [
+   [
+    "utf8",
+    "<text len 1>"
+   ],
+   [
+    "authenticity_token",
+    "<redacted>"
+   ],
+   [
+    "attempt",
+    "1"
+   ],
+   [
+    "validation_token",
+    "<redacted>"
+   ],
+   [
+    "question_24736656",
+    "7231"
+   ],
+   [
+    "last_question_id",
+    "24736656"
+   ]
+  ],
+  "resContentType": "text/html; charset=utf-8",
+  "redirectTo": "/courses/565820/quizzes/1632424/take/questions/24736635"
+ },
+ {
+  "method": "GET",
+  "url": "/courses/565820/quizzes/1632424/take/questions/24736635",
+  "status": 200,
+  "resContentType": "text/html; charset=utf-8"
+ },
+ {
+  "method": "PUT",
+  "url": "/courses/565820/quizzes/1632424/submissions/backup?user_id=1000001",
+  "status": 200,
+  "reqContentType": "application/x-www-form-urlencoded; charset=UTF-8",
+  "sent": [
+   [
+    "utf8",
+    "<text len 1>"
+   ],
+   [
+    "authenticity_token",
+    "<redacted>"
+   ],
+   [
+    "attempt",
+    "1"
+   ],
+   [
+    "validation_token",
+    "<redacted>"
+   ],
+   [
+    "text_after_answers",
+    ""
+   ],
+   [
+    "question_text",
+    "<text len 149>"
+   ],
+   [
+    "question_24736635",
+    "6799"
+   ],
+   [
+    "last_question_id",
+    "24736635"
+   ],
+   [
+    "question_24736635_marked",
+    ""
+   ]
+  ],
+  "resContentType": "application/json; charset=utf-8",
+  "received": {
+   "backup": true,
+   "end_at": "<text len 20>",
+   "time_left": 4690,
+   "hard_end_at": "<text len 20>",
+   "hard_time_left": 4690
+  }
+ },
+ {
+  "method": "POST",
+  "url": "/courses/565820/quizzes/1632424/submissions/50299517/record_answer?next_question_path=<text+len+55>&user_id=1000001",
+  "status": 302,
+  "reqContentType": "application/x-www-form-urlencoded",
+  "sent": [
+   [
+    "utf8",
+    "<text len 1>"
+   ],
+   [
+    "authenticity_token",
+    "<redacted>"
+   ],
+   [
+    "attempt",
+    "1"
+   ],
+   [
+    "validation_token",
+    "<redacted>"
+   ],
+   [
+    "question_24736635",
+    "6799"
+   ],
+   [
+    "last_question_id",
+    "24736635"
+   ]
+  ],
+  "resContentType": "text/html; charset=utf-8",
+  "redirectTo": "/courses/565820/quizzes/1632424/take/questions/24736608"
+ },
+ {
+  "method": "GET",
+  "url": "/courses/565820/quizzes/1632424/take/questions/24736608",
+  "status": 200,
+  "resContentType": "text/html; charset=utf-8"
+ },
+ {
+  "method": "PUT",
+  "url": "/courses/565820/quizzes/1632424/submissions/backup?user_id=1000001",
+  "status": 200,
+  "reqContentType": "application/x-www-form-urlencoded; charset=UTF-8",
+  "sent": [
+   [
+    "utf8",
+    "<text len 1>"
+   ],
+   [
+    "authenticity_token",
+    "<redacted>"
+   ],
+   [
+    "attempt",
+    "1"
+   ],
+   [
+    "validation_token",
+    "<redacted>"
+   ],
+   [
+    "text_after_answers",
+    ""
+   ],
+   [
+    "question_text",
+    "<text len 238>"
+   ],
+   [
+    "question_24736608",
+    "7943"
+   ],
+   [
+    "last_question_id",
+    "24736608"
+   ],
+   [
+    "question_24736608_marked",
+    ""
+   ]
+  ],
+  "resContentType": "application/json; charset=utf-8",
+  "received": {
+   "backup": true,
+   "end_at": "<text len 20>",
+   "time_left": 4685,
+   "hard_end_at": "<text len 20>",
+   "hard_time_left": 4685
+  }
+ },
+ {
+  "method": "POST",
+  "url": "/courses/565820/quizzes/1632424/submissions/50299517/record_answer?next_question_path=<text+len+55>&user_id=1000001",
+  "status": 302,
+  "reqContentType": "application/x-www-form-urlencoded",
+  "sent": [
+   [
+    "utf8",
+    "<text len 1>"
+   ],
+   [
+    "authenticity_token",
+    "<redacted>"
+   ],
+   [
+    "attempt",
+    "1"
+   ],
+   [
+    "validation_token",
+    "<redacted>"
+   ],
+   [
+    "question_24736608",
+    "7943"
+   ],
+   [
+    "last_question_id",
+    "24736608"
+   ]
+  ],
+  "resContentType": "text/html; charset=utf-8",
+  "redirectTo": "/courses/565820/quizzes/1632424/take/questions/24736639"
+ },
+ {
+  "method": "GET",
+  "url": "/courses/565820/quizzes/1632424/take/questions/24736639",
+  "status": 200,
+  "resContentType": "text/html; charset=utf-8"
+ },
+ {
+  "method": "PUT",
+  "url": "/courses/565820/quizzes/1632424/submissions/backup?user_id=1000001",
+  "status": 200,
+  "reqContentType": "application/x-www-form-urlencoded; charset=UTF-8",
+  "sent": [
+   [
+    "utf8",
+    "<text len 1>"
+   ],
+   [
+    "authenticity_token",
+    "<redacted>"
+   ],
+   [
+    "attempt",
+    "1"
+   ],
+   [
+    "validation_token",
+    "<redacted>"
+   ],
+   [
+    "text_after_answers",
+    ""
+   ],
+   [
+    "question_text",
+    "<text len 215>"
+   ],
+   [
+    "question_24736639",
+    "7419"
+   ],
+   [
+    "last_question_id",
+    "24736639"
+   ],
+   [
+    "question_24736639_marked",
+    ""
+   ]
+  ],
+  "resContentType": "application/json; charset=utf-8",
+  "received": {
+   "backup": true,
+   "end_at": "<text len 20>",
+   "time_left": 4680,
+   "hard_end_at": "<text len 20>",
+   "hard_time_left": 4680
+  }
+ },
+ {
+  "method": "POST",
+  "url": "/courses/565820/quizzes/1632424/submissions/50299517/record_answer?next_question_path=<text+len+55>&user_id=1000001",
+  "status": 302,
+  "reqContentType": "application/x-www-form-urlencoded",
+  "sent": [
+   [
+    "utf8",
+    "<text len 1>"
+   ],
+   [
+    "authenticity_token",
+    "<redacted>"
+   ],
+   [
+    "attempt",
+    "1"
+   ],
+   [
+    "validation_token",
+    "<redacted>"
+   ],
+   [
+    "question_24736639",
+    "7419"
+   ],
+   [
+    "last_question_id",
+    "24736639"
+   ]
+  ],
+  "resContentType": "text/html; charset=utf-8",
+  "redirectTo": "/courses/565820/quizzes/1632424/take/questions/24736616"
+ },
+ {
+  "method": "GET",
+  "url": "/courses/565820/quizzes/1632424/take/questions/24736616",
+  "status": 200,
+  "resContentType": "text/html; charset=utf-8"
+ },
+ {
+  "method": "PUT",
+  "url": "/courses/565820/quizzes/1632424/submissions/backup?user_id=1000001",
+  "status": 200,
+  "reqContentType": "application/x-www-form-urlencoded; charset=UTF-8",
+  "sent": [
+   [
+    "utf8",
+    "<text len 1>"
+   ],
+   [
+    "authenticity_token",
+    "<redacted>"
+   ],
+   [
+    "attempt",
+    "1"
+   ],
+   [
+    "validation_token",
+    "<redacted>"
+   ],
+   [
+    "text_after_answers",
+    ""
+   ],
+   [
+    "question_text",
+    "<text len 552>"
+   ],
+   [
+    "question_24736616",
+    "5917"
+   ],
+   [
+    "last_question_id",
+    "24736616"
+   ],
+   [
+    "question_24736616_marked",
+    ""
+   ]
+  ],
+  "resContentType": "application/json; charset=utf-8",
+  "received": {
+   "backup": true,
+   "end_at": "<text len 20>",
+   "time_left": 4672,
+   "hard_end_at": "<text len 20>",
+   "hard_time_left": 4672
+  }
+ },
+ {
+  "method": "POST",
+  "url": "/courses/565820/quizzes/1632424/submissions/50299517/record_answer?next_question_path=<text+len+55>&user_id=1000001",
+  "status": 302,
+  "reqContentType": "application/x-www-form-urlencoded",
+  "sent": [
+   [
+    "utf8",
+    "<text len 1>"
+   ],
+   [
+    "authenticity_token",
+    "<redacted>"
+   ],
+   [
+    "attempt",
+    "1"
+   ],
+   [
+    "validation_token",
+    "<redacted>"
+   ],
+   [
+    "question_24736616",
+    "5917"
+   ],
+   [
+    "last_question_id",
+    "24736616"
+   ]
+  ],
+  "resContentType": "text/html; charset=utf-8",
+  "redirectTo": "/courses/565820/quizzes/1632424/take/questions/24736605"
+ },
+ {
+  "method": "GET",
+  "url": "/courses/565820/quizzes/1632424/take/questions/24736605",
+  "status": 200,
+  "resContentType": "text/html; charset=utf-8"
+ },
+ {
+  "method": "PUT",
+  "url": "/courses/565820/quizzes/1632424/submissions/backup?user_id=1000001",
+  "status": 200,
+  "reqContentType": "application/x-www-form-urlencoded; charset=UTF-8",
+  "sent": [
+   [
+    "utf8",
+    "<text len 1>"
+   ],
+   [
+    "authenticity_token",
+    "<redacted>"
+   ],
+   [
+    "attempt",
+    "1"
+   ],
+   [
+    "validation_token",
+    "<redacted>"
+   ],
+   [
+    "text_after_answers",
+    ""
+   ],
+   [
+    "question_text",
+    "<text len 507>"
+   ],
+   [
+    "question_24736605",
+    "3224"
+   ],
+   [
+    "last_question_id",
+    "24736605"
+   ],
+   [
+    "question_24736605_marked",
+    ""
+   ]
+  ],
+  "resContentType": "application/json; charset=utf-8",
+  "received": {
+   "backup": true,
+   "end_at": "<text len 20>",
+   "time_left": 4667,
+   "hard_end_at": "<text len 20>",
+   "hard_time_left": 4667
+  }
+ },
+ {
+  "method": "POST",
+  "url": "/courses/565820/quizzes/1632424/submissions/50299517/record_answer?next_question_path=<text+len+55>&user_id=1000001",
+  "status": 302,
+  "reqContentType": "application/x-www-form-urlencoded",
+  "sent": [
+   [
+    "utf8",
+    "<text len 1>"
+   ],
+   [
+    "authenticity_token",
+    "<redacted>"
+   ],
+   [
+    "attempt",
+    "1"
+   ],
+   [
+    "validation_token",
+    "<redacted>"
+   ],
+   [
+    "question_24736605",
+    "3224"
+   ],
+   [
+    "last_question_id",
+    "24736605"
+   ]
+  ],
+  "resContentType": "text/html; charset=utf-8",
+  "redirectTo": "/courses/565820/quizzes/1632424/take/questions/24736621"
+ },
+ {
+  "method": "GET",
+  "url": "/courses/565820/quizzes/1632424/take/questions/24736621",
+  "status": 200,
+  "resContentType": "text/html; charset=utf-8"
+ },
+ {
+  "method": "PUT",
+  "url": "/courses/565820/quizzes/1632424/submissions/backup?user_id=1000001",
+  "status": 200,
+  "reqContentType": "application/x-www-form-urlencoded; charset=UTF-8",
+  "sent": [
+   [
+    "utf8",
+    "<text len 1>"
+   ],
+   [
+    "authenticity_token",
+    "<redacted>"
+   ],
+   [
+    "attempt",
+    "1"
+   ],
+   [
+    "validation_token",
+    "<redacted>"
+   ],
+   [
+    "text_after_answers",
+    ""
+   ],
+   [
+    "question_text",
+    "<text len 260>"
+   ],
+   [
+    "question_24736621",
+    "7971"
+   ],
+   [
+    "last_question_id",
+    "24736621"
+   ],
+   [
+    "question_24736621_marked",
+    ""
+   ]
+  ],
+  "resContentType": "application/json; charset=utf-8",
+  "received": {
+   "backup": true,
+   "end_at": "<text len 20>",
+   "time_left": 4662,
+   "hard_end_at": "<text len 20>",
+   "hard_time_left": 4662
+  }
+ },
+ {
+  "method": "POST",
+  "url": "/courses/565820/quizzes/1632424/submissions/50299517/record_answer?next_question_path=<text+len+55>&user_id=1000001",
+  "status": 302,
+  "reqContentType": "application/x-www-form-urlencoded",
+  "sent": [
+   [
+    "utf8",
+    "<text len 1>"
+   ],
+   [
+    "authenticity_token",
+    "<redacted>"
+   ],
+   [
+    "attempt",
+    "1"
+   ],
+   [
+    "validation_token",
+    "<redacted>"
+   ],
+   [
+    "question_24736621",
+    "7971"
+   ],
+   [
+    "last_question_id",
+    "24736621"
+   ]
+  ],
+  "resContentType": "text/html; charset=utf-8",
+  "redirectTo": "/courses/565820/quizzes/1632424/take/questions/24736654"
+ },
+ {
+  "method": "GET",
+  "url": "/courses/565820/quizzes/1632424/take/questions/24736654",
+  "status": 200,
+  "resContentType": "text/html; charset=utf-8"
+ },
+ {
+  "method": "PUT",
+  "url": "/courses/565820/quizzes/1632424/submissions/backup?user_id=1000001",
+  "status": 200,
+  "reqContentType": "application/x-www-form-urlencoded; charset=UTF-8",
+  "sent": [
+   [
+    "utf8",
+    "<text len 1>"
+   ],
+   [
+    "authenticity_token",
+    "<redacted>"
+   ],
+   [
+    "attempt",
+    "1"
+   ],
+   [
+    "validation_token",
+    "<redacted>"
+   ],
+   [
+    "text_after_answers",
+    ""
+   ],
+   [
+    "question_text",
+    "<text len 431>"
+   ],
+   [
+    "last_question_id",
+    "24736654"
+   ],
+   [
+    "question_24736654_marked",
+    ""
+   ]
+  ],
+  "resContentType": "application/json; charset=utf-8",
+  "received": {
+   "backup": true,
+   "end_at": "<text len 20>",
+   "time_left": 4644,
+   "hard_end_at": "<text len 20>",
+   "hard_time_left": 4644
+  }
+ },
+ {
+  "method": "PUT",
+  "url": "/courses/565820/quizzes/1632424/submissions/backup?user_id=1000001",
+  "status": 200,
+  "reqContentType": "application/x-www-form-urlencoded; charset=UTF-8",
+  "sent": [
+   [
+    "utf8",
+    "<text len 1>"
+   ],
+   [
+    "authenticity_token",
+    "<redacted>"
+   ],
+   [
+    "attempt",
+    "1"
+   ],
+   [
+    "validation_token",
+    "<redacted>"
+   ],
+   [
+    "text_after_answers",
+    ""
+   ],
+   [
+    "question_text",
+    "<text len 431>"
+   ],
+   [
+    "last_question_id",
+    "24736654"
+   ],
+   [
+    "question_24736654_marked",
+    ""
+   ]
+  ],
+  "resContentType": "application/json; charset=utf-8",
+  "received": {
+   "backup": true,
+   "end_at": "<text len 20>",
+   "time_left": 4586,
+   "hard_end_at": "<text len 20>",
+   "hard_time_left": 4586
+  }
+ },
+ {
+  "method": "PUT",
+  "url": "/courses/565820/quizzes/1632424/submissions/backup?user_id=1000001",
+  "status": 200,
+  "reqContentType": "application/x-www-form-urlencoded; charset=UTF-8",
+  "sent": [
+   [
+    "utf8",
+    "<text len 1>"
+   ],
+   [
+    "authenticity_token",
+    "<redacted>"
+   ],
+   [
+    "attempt",
+    "1"
+   ],
+   [
+    "validation_token",
+    "<redacted>"
+   ],
+   [
+    "text_after_answers",
+    ""
+   ],
+   [
+    "question_text",
+    "<text len 431>"
+   ],
+   [
+    "last_question_id",
+    "24736654"
+   ],
+   [
+    "question_24736654_marked",
+    ""
+   ]
+  ],
+  "resContentType": "application/json; charset=utf-8",
+  "received": {
+   "backup": true,
+   "end_at": "<text len 20>",
+   "time_left": 4526,
+   "hard_end_at": "<text len 20>",
+   "hard_time_left": 4526
+  }
+ },
+ {
+  "method": "PUT",
+  "url": "/courses/565820/quizzes/1632424/submissions/backup?user_id=1000001",
+  "status": 200,
+  "reqContentType": "application/x-www-form-urlencoded; charset=UTF-8",
+  "sent": [
+   [
+    "utf8",
+    "<text len 1>"
+   ],
+   [
+    "authenticity_token",
+    "<redacted>"
+   ],
+   [
+    "attempt",
+    "1"
+   ],
+   [
+    "validation_token",
+    "<redacted>"
+   ],
+   [
+    "text_after_answers",
+    ""
+   ],
+   [
+    "question_text",
+    "<text len 431>"
+   ],
+   [
+    "question_24736654",
+    "3223"
+   ],
+   [
+    "last_question_id",
+    "24736654"
+   ],
+   [
+    "question_24736654_marked",
+    ""
+   ]
+  ],
+  "resContentType": "application/json; charset=utf-8",
+  "received": {
+   "backup": true,
+   "end_at": "<text len 20>",
+   "time_left": 4374,
+   "hard_end_at": "<text len 20>",
+   "hard_time_left": 4374
+  }
+ },
+ {
+  "method": "POST",
+  "url": "/courses/565820/quizzes/1632424/submissions/50299517/record_answer?next_question_path=<text+len+55>&user_id=1000001",
+  "status": 302,
+  "reqContentType": "application/x-www-form-urlencoded",
+  "sent": [
+   [
+    "utf8",
+    "<text len 1>"
+   ],
+   [
+    "authenticity_token",
+    "<redacted>"
+   ],
+   [
+    "attempt",
+    "1"
+   ],
+   [
+    "validation_token",
+    "<redacted>"
+   ],
+   [
+    "question_24736654",
+    "5735"
+   ],
+   [
+    "last_question_id",
+    "24736654"
+   ]
+  ],
+  "resContentType": "text/html; charset=utf-8",
+  "redirectTo": "/courses/565820/quizzes/1632424/take/questions/24736650"
+ },
+ {
+  "method": "GET",
+  "url": "/courses/565820/quizzes/1632424/take/questions/24736650",
+  "status": 200,
+  "resContentType": "text/html; charset=utf-8"
+ },
+ {
+  "method": "POST",
+  "url": "/courses/565820/quizzes/1632424/submissions/50299517/record_answer?next_question_path=<text+len+55>&user_id=1000001",
+  "status": 302,
+  "reqContentType": "application/x-www-form-urlencoded",
+  "sent": [
+   [
+    "utf8",
+    "<text len 1>"
+   ],
+   [
+    "authenticity_token",
+    "<redacted>"
+   ],
+   [
+    "attempt",
+    "1"
+   ],
+   [
+    "validation_token",
+    "<redacted>"
+   ],
+   [
+    "question_24736650",
+    "6708"
+   ],
+   [
+    "last_question_id",
+    "24736650"
+   ]
+  ],
+  "resContentType": "text/html; charset=utf-8",
+  "redirectTo": "/courses/565820/quizzes/1632424/take/questions/24736640"
+ },
+ {
+  "method": "GET",
+  "url": "/courses/565820/quizzes/1632424/take/questions/24736640",
+  "status": 200,
+  "resContentType": "text/html; charset=utf-8"
+ },
+ {
+  "dialog": "confirm",
+  "message": "You have 43 unanswered questions (see the right sidebar for details).  Submit anyway?"
+ },
+ {
+  "method": "POST",
+  "url": "/courses/565820/quizzes/1632424/submissions?user_id=1000001",
+  "status": 302,
+  "reqContentType": "application/x-www-form-urlencoded",
+  "sent": [
+   [
+    "utf8",
+    "<text len 1>"
+   ],
+   [
+    "authenticity_token",
+    "<redacted>"
+   ],
+   [
+    "attempt",
+    "1"
+   ],
+   [
+    "validation_token",
+    "<redacted>"
+   ],
+   [
+    "question_24736640",
+    "3327"
+   ],
+   [
+    "last_question_id",
+    "24736640"
+   ]
+  ],
+  "resContentType": "text/html; charset=utf-8",
+  "redirectTo": "/courses/565820/quizzes/1632424"
+ }
+]

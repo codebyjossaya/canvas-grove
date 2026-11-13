@@ -1,0 +1,96 @@
+/* ---------------------------------------------------------------------------
+   Motion layer. Route transitions use React <ViewTransition> (components/ui/page-transition.tsx);
+   everything else is CSS. Principles: exits are quick and quiet, entrances are slightly slower
+   and settle with a soft spring, and only content moves, never the shell. All of it is
+   disabled under prefers-reduced-motion.
+   --------------------------------------------------------------------------- */
+:root{
+  /* Damped spring (zeta about .72): about 4% overshoot, settles cleanly. */
+  --ease-spring:linear(0,.028,.098,.194,.303,.415,.524,.625,.715,.793,.858,.911,.952,.983,1.006,1.022,1.032,1.037,1.038,1.038,1.035,1.031,1.027,1.023,1.019,1.015,1.011,1.008,1.006,1.004,1.002,1.001,1);
+  --ease-out-expo:cubic-bezier(.16,1,.3,1);
+  --vt-exit:140ms;--vt-enter:340ms;--vt-move:420ms;
+  interpolate-size:allow-keywords;
+}
+
+/* ---- view transitions: shared ---- */
+::view-transition{pointer-events:none}
+/* The shell (sidebar, top bar) lives in the root snapshot: keep its crossfade brief. */
+::view-transition-group(root){animation-duration:200ms}
+
+@keyframes vt-fade-out{to{opacity:0}}
+@keyframes vt-fade-in{from{opacity:0}}
+@keyframes vt-rise{from{transform:translate3d(0,10px,0) scale(.995);filter:blur(2px)}}
+@keyframes vt-sink{to{transform:translate3d(0,-4px,0)}}
+@keyframes vt-slide-from{from{translate:var(--vt-offset) 0;filter:blur(2px)}}
+@keyframes vt-slide-to{to{translate:var(--vt-offset) 0}}
+
+/* Default navigation: old page dissolves, new page rises into place. */
+::view-transition-old(.page-out){animation:var(--vt-exit) var(--ease-standard) both vt-fade-out,var(--vt-exit) var(--ease-standard) both vt-sink}
+::view-transition-new(.page-in){animation:220ms var(--ease-out) 60ms both vt-fade-in,var(--vt-enter) var(--ease-out-expo) both vt-rise}
+
+/* Drilling in / backing out: a short directional slide. */
+::view-transition-old(.nav-forward){--vt-offset:-32px;animation:var(--vt-exit) ease-in both vt-fade-out,var(--vt-move) var(--ease-out-expo) both vt-slide-to}
+::view-transition-new(.nav-forward){--vt-offset:48px;animation:220ms var(--ease-out) 80ms both vt-fade-in,var(--vt-move) var(--ease-out-expo) both vt-slide-from}
+::view-transition-old(.nav-back){--vt-offset:32px;animation:var(--vt-exit) ease-in both vt-fade-out,var(--vt-move) var(--ease-out-expo) both vt-slide-to}
+::view-transition-new(.nav-back){--vt-offset:-48px;animation:220ms var(--ease-out) 80ms both vt-fade-in,var(--vt-move) var(--ease-out-expo) both vt-slide-from}
+
+/* Skeleton hand-off. */
+::view-transition-new(.skeleton-in){animation:200ms var(--ease-standard) both vt-fade-in}
+::view-transition-old(.skeleton-out){animation:120ms var(--ease-standard) both vt-fade-out}
+
+/* Active markers glide between items. */
+::view-transition-group(.marker){animation-duration:var(--vt-move);animation-timing-function:var(--ease-spring)}
+::view-transition-old(.marker){display:none}
+::view-transition-new(.marker){animation:none}
+/* The sidebar pill is drawn above the root snapshot while it moves; blending keeps the labels
+   underneath readable instead of covering them. */
+::view-transition-group(nav-pill),::view-transition-group(course-pill){mix-blend-mode:multiply}
+:root[data-theme="dark"]::view-transition-group(nav-pill),:root[data-theme="dark"]::view-transition-group(course-pill){mix-blend-mode:screen}
+
+/* Theme switch: the new theme spreads out from the toggle (clip-path is driven from JS). */
+:root[data-vt="theme"]::view-transition-old(root),:root[data-vt="theme"]::view-transition-new(root){animation:none;mix-blend-mode:normal}
+:root[data-vt="theme"]::view-transition-new(root){z-index:2}
+
+/* ---- active markers ---- */
+.side-nav a,.sidebar-link,.sidebar-course{isolation:isolate}
+.sidebar-course{position:relative}
+.side-nav a[aria-current="page"],.sidebar-link[aria-current="page"],.sidebar-course[aria-current="page"]{background:transparent}
+.nav-pill{position:absolute;inset:0;z-index:-1;border-radius:inherit;background:var(--sidebar-surface);pointer-events:none}
+.tabbar a,.tabbar button{position:relative}
+.tab-pill{position:absolute;top:0;left:50%;width:32px;height:3px;margin-left:-16px;border-radius:0 0 3px 3px;background:var(--accent-primary);pointer-events:none}
+
+/* ---- micro-interactions ---- */
+.button{transition:background-color var(--motion-fast) var(--ease-standard),border-color var(--motion-fast) var(--ease-standard),color var(--motion-fast) var(--ease-standard),box-shadow var(--motion-base) var(--ease-standard),transform 300ms var(--ease-spring)}
+.button:active:not(:disabled){transform:scale(.97);transition-duration:var(--motion-fast),var(--motion-fast),var(--motion-fast),var(--motion-fast),90ms}
+.button.primary:hover:not(:disabled){box-shadow:inset 0 1px 0 rgba(255,255,255,.12),0 2px 10px color-mix(in srgb,var(--accent-primary) 28%,transparent)}
+.side-nav a,.sidebar-link,.sidebar-course,.tabbar a,.tabbar button{transition:background-color var(--motion-fast) var(--ease-standard),color var(--motion-fast) var(--ease-standard),transform 280ms var(--ease-spring)}
+.side-nav a:active,.sidebar-link:active,.sidebar-course:active,.tabbar a:active,.tabbar button:active{transform:scale(.97);transition-duration:var(--motion-fast),var(--motion-fast),90ms}
+.tabbar svg{transition:transform 380ms var(--ease-spring)}
+.tabbar [aria-current="page"] svg{transform:translateY(-1px) scale(1.06)}
+.theme-icon{transition:transform 520ms var(--ease-spring)}
+.theme-toggle:active .theme-icon{transform:rotate(-30deg) scale(.9);transition-duration:90ms}
+
+/* Smooth disclosure for content <details> (popover-style ones opt out). */
+details:not([class*="moreTabs"])::details-content{block-size:0;overflow-y:clip;opacity:0;transition:block-size 320ms var(--ease-out-expo),opacity 200ms var(--ease-standard),content-visibility 320ms allow-discrete}
+details:not([class*="moreTabs"])[open]::details-content{block-size:auto;opacity:1}
+
+/* Sheets and overlays settle with a spring. */
+.sheet-scrim{animation:cg-fade var(--motion-base) var(--ease-standard)}
+.more-sheet{transform-origin:50% 100%;animation:cg-sheet-in 420ms var(--ease-spring) both}
+@keyframes cg-sheet-in{from{opacity:0;transform:translate3d(0,16px,0) scale(.97)}40%{opacity:1}}
+.palette{transform-origin:50% 0;animation:cg-palette-in 360ms var(--ease-spring) both}
+@keyframes cg-palette-in{from{opacity:0;transform:translate3d(0,-6px,0) scale(.965)}50%{opacity:1}}
+.palette-scrim{backdrop-filter:blur(2px)}
+
+/* Command palette: one highlight that glides to the active option. */
+.palette-list{position:relative}
+.palette-hl{position:absolute;top:0;left:6px;right:6px;z-index:0;border-radius:var(--radius-md);background:var(--surface-hover);pointer-events:none;transition:transform 260ms var(--ease-spring),height 200ms var(--ease-out),opacity var(--motion-fast)}
+:root[data-theme="dark"] .palette-hl{background:var(--surface-muted)}
+.palette-list:has(.palette-hl) .palette-option[aria-selected="true"]{background:transparent}
+.palette-option,.palette-group,.palette-empty{position:relative;z-index:1}
+.palette-option{transition:color var(--motion-fast) var(--ease-standard)}
+
+@media (prefers-reduced-motion:reduce){
+  ::view-transition-group(*),::view-transition-old(*),::view-transition-new(*){animation-duration:0s!important;animation-delay:0s!important}
+  details::details-content{transition:none!important}
+}

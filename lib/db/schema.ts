@@ -197,7 +197,7 @@ export const canvasSessionHealthEvents = pgTable("canvas_session_health_events",
   callCount: integer("call_count").notNull().default(1), okCount: integer("ok_count").notNull().default(0), authRequiredCount: integer("auth_required_count").notNull().default(0), errorCount: integer("error_count").notNull().default(0), sessionCookieReissueCount: integer("session_cookie_reissue_count").notNull().default(0),
 }, (t) => [
   foreignKey({ columns: [t.ownerId, t.hostedSessionId], foreignColumns: [hostedBrowserSessions.ownerId, hostedBrowserSessions.id], name: "canvas_session_health_events_tenant_session_fk" }).onDelete("cascade"),
-  check("canvas_session_health_events_kind_check", sql`${t.kind} in ('keepalive', 'sync', 'restore-check', 'api')`),
+  check("canvas_session_health_events_kind_check", sql`${t.kind} in ('keepalive', 'sync', 'restore-check', 'api', 'page-keepalive')`),
   check("canvas_session_health_events_outcome_check", sql`${t.outcome} in ('ok', 'auth_required', 'error')`),
   check("canvas_session_health_events_names_check", sql`cardinality(${t.cookieNamesRotated}) <= 32`),
   index("canvas_session_health_events_session_time_idx").on(t.ownerId, t.hostedSessionId, t.at),

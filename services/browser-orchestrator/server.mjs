@@ -8,7 +8,10 @@ import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
 import { classifyManagedContainer } from "./orphan-policy.mjs";
 import { allowedInteractiveUrl } from "./navigation-policy.mjs";
+import { canvasLanded, egressHostAllowed } from "./navigation-policy.mjs";
 import { mobileLaunchEnv, validDisplay } from "./display-policy.mjs";
+import { MirrorEngine } from "./mirror/engine.mjs";
+import { MIRROR_LIMITS, validateInputMessage } from "./viewer/mirror-protocol.js";
 
 const run = promisify(execFile);
 const PORT = Number(process.env.PORT || 8080);
@@ -28,11 +31,27 @@ const NOVNC_ROOT = process.env.NOVNC_ROOT || "/usr/share/novnc";
 const VIEWER_ROOT = process.env.VIEWER_ROOT || new URL("./viewer", import.meta.url).pathname;
 const ORPHAN_GRACE_MS = Math.max(300, Number(process.env.BROWSER_ORPHAN_GRACE_SECONDS || 600)) * 1000;
 const DEFAULT_DISPLAY = { width: 1280, height: 720 };
+// Sign-in renderer. "pixels" (noVNC, the default) or "mirror" (sanitized DOM
+// mirror with automatic per-page fallback to pixels). The per-link override
+// (?renderer= on /live) is honoured ONLY when SIGNIN_RENDERER_OVERRIDE=allow,
+// which is meant for dev/test deployments. SIGNIN_PIXEL_FOCUS=on enables the
+// pixel-mode "focus" event (editable/inputType/rect only) for the soft keyboard.
+const SIGNIN_RENDERER = process.env.SIGNIN_RENDERER === "mirror" ? "mirror" : "pixels";
+const SIGNIN_RENDERER_OVERRIDE = process.env.SIGNIN_RENDERER_OVERRIDE === "allow";
+const SIGNIN_PIXEL_FOCUS = process.env.SIGNIN_PIXEL_FOCUS === "on";
+// Viewer grants slide: every authenticated viewer request, open websocket and
+// events-stream tick renews the idle window, up to a hard cap per /live link.
+// The relay's viewer capability is minted for the same hard cap.
+const VIEWER_IDLE_MS = 5 * 60_000, VIEWER_MAX_MS = 30 * 60_000;
+// Dev-only recording mode (scripts/quiz-flow-recorder.ts): a session created with
+// devRecording:true never blanks on "landed" and gets a 30-minute viewer grant.
+// Honoured ONLY when BROWSER_DEV_RECORDING=allow; never enable it in production.
+const DEV_RECORDING_ALLOWED = process.env.BROWSER_DEV_RECORDING === "allow";
 class BrowserNetworkPolicyError extends Error {}
 if (SECRET.length < 32) throw new Error("BROWSER_ORCHESTRATOR_SECRET must contain at least 32 characters");
 if (RELAY_SECRET.length < 32 || RELAY_SECRET === SECRET) throw new Error("A distinct BROWSER_RELAY_SECRET is required");
 try { const origin = new URL(PUBLIC_BASE); if (origin.protocol !== "https:" || origin.origin !== PUBLIC_BASE) throw new Error(); }
-catch { throw new Error("BROWSER_PUBLIC_BASE_URL must be the exact external HTTPS origin (for this host use https://desktop-lnvmg14.tail8dc4e4.ts.net)"); }
+catch { throw new Error("BROWSER_PUBLIC_BASE_URL must be the exact external HTTPS origin (for this host use https://canvas-grove.tail8dc4e4.ts.net)"); }
 
 const sessions = new Map();
 const nonces = new Map();
@@ -145,7 +164,7 @@ async function reconcileRelayEpoch() {
 }
 
 function persistRegistry() {
-  const value = JSON.stringify({ version: 2, sessions: [...sessions.values()].map(({ id, name, canvasOrigin, authHostRules, loginPath, display, createdAt, lastUsedAt }) => ({ id, name, canvasOrigin, authHostRules, loginPath, display, createdAt, lastUsedAt })), warmPool });
+  const value = JSON.stringify({ version: 2, sessions: [...sessions.values()].map(({ id, name, canvasOrigin, authHostRules, loginPath, display, createdAt, lastUsedAt, devRecording }) => ({ id, name, canvasOrigin, authHostRules, loginPath, display, createdAt, lastUsedAt, ...(devRecording ? { devRecording: true } : {}) })), warmPool });
   persisting = persisting.catch(() => undefined).then(async () => {
     const slash = REGISTRY_PATH.lastIndexOf("/"); const directory = slash > 0 ? REGISTRY_PATH.slice(0, slash) : ".";
     await mkdir(directory, { recursive: true }); const temporary = `${REGISTRY_PATH}.${process.pid}.tmp`;
@@ -172,7 +191,7 @@ async function restoreRegistry() {
   const currentImage = async (name) => (await run("docker", ["inspect", "-f", "{{.Image}}", name], { timeout: 10_000, windowsHide: true }).catch(() => ({ stdout: "" }))).stdout.trim() === currentImageId;
   for (const item of stored.sessions) {
     if (!/^[0-9a-f-]{36}$/.test(item?.id || "") || !/^canvas-browser-[a-z0-9-]+$/.test(item?.name || "") || !validOrigin(item?.canvasOrigin) || !validDisplay(item?.display) || !await running(item.name)) continue;
-    const restored = { ...item, authHostRules: validAuthHostRules(item.authHostRules) ?? [], loginPath: validLoginPath(item.loginPath) ? item.loginPath : "/login", lastUsedAt: Date.now() };
+    const restored = { ...item, authHostRules: validAuthHostRules(item.authHostRules) ?? [], loginPath: validLoginPath(item.loginPath) ? item.loginPath : "/login", lastUsedAt: Date.now(), devRecording: DEV_RECORDING_ALLOWED && item.devRecording === true };
     sessions.set(item.id, restored);
     await ensureSessionNetwork(restored);
     await registerRelaySession(restored);
@@ -260,9 +279,16 @@ function publicAddress(value) {
   return false;
 }
 
-async function resolvesPublicOnly(hostname) {
-  try { const addresses = await lookup(hostname, { all: true, verbatim: true }); return addresses.length > 0 && addresses.every(({ address }) => publicAddress(address)); }
-  catch { return false; }
+/** "public" | "private" | "unresolved" — retries transient DNS failures. */
+async function resolvePublicOnly(hostname) {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      const addresses = await lookup(hostname, { all: true, verbatim: true });
+      if (addresses.length) return addresses.every(({ address }) => publicAddress(address)) ? "public" : "private";
+    } catch (error) { if (error?.code === "ENOTFOUND" && attempt >= 1) return "unresolved"; }
+    await new Promise((resolve) => setTimeout(resolve, 400 * (attempt + 1)));
+  }
+  return "unresolved";
 }
 
 // validDisplay / mobileLaunchEnv live in ./display-policy.mjs so they can be tested directly.
@@ -320,7 +346,7 @@ async function replenishWarmPool() {
   finally { replenishing = false; }
 }
 
-async function createBrowser(canvasOrigin, authHostRules, loginPath, display) {
+async function createBrowser(canvasOrigin, authHostRules, loginPath, display, devRecording = false) {
   const startedAt = Date.now();
   const id = randomUUID();
   // Warm browsers are desktop-profile only; mobile sessions always cold-launch.
@@ -333,7 +359,7 @@ async function createBrowser(canvasOrigin, authHostRules, loginPath, display) {
     await run("docker", ["rename", name, claimedName], { timeout: 10_000, windowsHide: true });
     name = claimedName;
   }
-  const session = { id, name, canvasOrigin, authHostRules, loginPath, display, createdAt: Date.now(), lastUsedAt: Date.now() };
+  const session = { id, name, canvasOrigin, authHostRules, loginPath, display, createdAt: Date.now(), lastUsedAt: Date.now(), devRecording: DEV_RECORDING_ALLOWED && devRecording === true };
   sessions.set(id, session);
   let createStage = "network";
   try {
@@ -359,10 +385,11 @@ async function createBrowser(canvasOrigin, authHostRules, loginPath, display) {
   return session;
 }
 
-async function removeBrowser(session) {
+async function removeBrowser(session, reason = "ended") {
   if (removals.has(session.id)) return;
   removals.add(session.id);
-  await revokeSessionLive(session.id);
+  closeMirrorEngine(session.id);
+  await revokeSessionLive(session.id, reason);
   sessions.delete(session.id);
   for (const [key, item] of liveTokens) if (item.sessionId === session.id) liveTokens.delete(key);
   for (const [key, item] of viewerGrants) if (item.sessionId === session.id) viewerGrants.delete(key);
@@ -385,6 +412,7 @@ async function browserIsRunning(session) {
 
 
 async function forgetMissingBrowser(session) {
+  closeMirrorEngine(session.id);
   await revokeSessionLive(session.id);
   await relayRequest("DELETE", `/v1/sessions/${session.id}`).catch(() => undefined);
   await removeSessionNetwork(session.id);
@@ -416,17 +444,158 @@ async function reconcileOrphans(ownedSessionIds) {
   return { removed, quarantined, protected: registryNames.size + ownedNames.size };
 }
 
+/** Slide a viewer grant's idle expiry, never past its hard cap. */
+function touchGrant(grant) {
+  if (!grant) return;
+  const hard = grant.hardExpiresAt ?? grant.expiresAt;
+  grant.expiresAt = Math.max(grant.expiresAt, Math.min(hard, Date.now() + (grant.idleMs || VIEWER_IDLE_MS)));
+}
+
 function viewerCookie(req) {
   const match = /(?:^|;\s*)browser_view=([^;]+)/.exec(req.headers.cookie || "");
   return match?.[1];
 }
 
-async function revokeSessionLive(sessionId) {
+// Why a viewer was cut off. "signed-in" is sent only by the app after it has
+// committed the captured Canvas session (releaseLoginBrowser), so the viewer can
+// show success instead of waiting on its parent window.
+const CLOSE_REASONS = new Set(["signed-in", "blocked", "ended"]);
+async function revokeSessionLive(sessionId, reason = "ended") {
   for (const [key, item] of liveTokens) if (item.sessionId === sessionId) liveTokens.delete(key);
   for (const [key, item] of viewerGrants) if (item.sessionId === sessionId) viewerGrants.delete(key);
-  for (const socket of viewerSockets.get(sessionId) || []) socket.destroy();
+  const closeReason = CLOSE_REASONS.has(reason) ? reason : "ended";
+  for (const socket of viewerSockets.get(sessionId) || []) {
+    // Events streams get a final "closed" event (reason only, never a URL).
+    if (socket.viewerEvents && !socket.writableEnded) { try { socket.end(`event: closed\ndata: ${JSON.stringify({ reason: closeReason })}\n\n`); continue; } catch { /* fall through */ } }
+    socket.destroy();
+  }
   viewerSockets.delete(sessionId);
+  closeMirrorEngine(sessionId);
   await relayRequest("POST", `/v1/sessions/${sessionId}/revoke`, {}).catch(() => undefined);
+}
+
+// ---- DOM mirror engines: one per browser session while a viewer subscribes.
+const mirrorEngines = new Map();
+const MIRROR_IDLE_MS = 15_000;
+function closeMirrorEngine(sessionId) {
+  const engine = mirrorEngines.get(sessionId);
+  if (!engine) return;
+  mirrorEngines.delete(sessionId); clearTimeout(engine.idleTimer); engine.close();
+}
+function mirrorEngine(session) {
+  let engine = mirrorEngines.get(session.id);
+  if (engine && !engine.closed) { clearTimeout(engine.idleTimer); return engine; }
+  const exactHosts = [new URL(session.canvasOrigin).hostname.toLowerCase(), ...session.authHostRules];
+  engine = new MirrorEngine({
+    sessionId: session.id,
+    display: session.display,
+    // The relay mints a session-bound "mirror" CDP capability; nothing here
+    // can reach the browser except through it.
+    connectUrl: async () => {
+      const capability = await relayRequest("POST", `/v1/sessions/${session.id}/capability`, { kind: "mirror", ttlSeconds: 900 });
+      const version = await fetch(`${RELAY_URL}/proxy/mirror/${capability.token}/json/version`, { signal: AbortSignal.timeout(5_000) }).then((response) => response.json());
+      const debuggerPath = new URL(String(version.webSocketDebuggerUrl)).pathname;
+      if (!/^\/devtools\/browser\/[A-Za-z0-9-]+$/.test(debuggerPath)) throw new Error("Unexpected debugger path");
+      return `${RELAY_URL.replace(/^http/, "ws")}/proxy/mirror/${capability.token}${debuggerPath}`;
+    },
+    resourceHostAllowed: (host) => egressHostAllowed(host, exactHosts),
+    mirrorable: (value) => allowedInteractiveUrl(value, session.canvasOrigin, session.authHostRules) && !canvasLanded(value, session.canvasOrigin),
+    landed: (value) => canvasLanded(value, session.canvasOrigin),
+    log: (entry) => console.log(JSON.stringify({ ...entry, sessionId: session.id })),
+  });
+  mirrorEngines.set(session.id, engine);
+  return engine;
+}
+function subscribeMirror(session, subscriber) {
+  const engine = mirrorEngine(session);
+  const unsubscribe = engine.subscribe(subscriber);
+  return () => {
+    unsubscribe();
+    if (engine.subscribers.size === 0) {
+      clearTimeout(engine.idleTimer);
+      engine.idleTimer = setTimeout(() => { if (engine.subscribers.size === 0 && mirrorEngines.get(session.id) === engine) closeMirrorEngine(session.id); }, MIRROR_IDLE_MS);
+    }
+  };
+}
+
+// Per-session input rate limit (token bucket).
+const inputBuckets = new Map();
+function takeInputToken(sessionId) {
+  const now = Date.now(), rate = MIRROR_LIMITS.inputRatePerSecond;
+  const bucket = inputBuckets.get(sessionId) || { tokens: rate, at: now };
+  bucket.tokens = Math.min(rate, bucket.tokens + ((now - bucket.at) / 1000) * rate); bucket.at = now;
+  inputBuckets.set(sessionId, bucket);
+  if (bucket.tokens < 1) return false;
+  bucket.tokens -= 1; return true;
+}
+
+const MIRROR_FRAME_CSP = "default-src 'none'; script-src 'none'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; media-src 'none'; object-src 'none'; frame-src 'self'; child-src 'self'; connect-src 'none'; form-action 'none'; base-uri 'none'; frame-ancestors 'self'; sandbox allow-same-origin";
+const MIRROR_RESOURCE_CSP = "default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:; sandbox";
+const mirrorFrameDocument = (quirks) => `${quirks ? "" : "<!doctype html>"}<html><head><meta charset="utf-8"></head><body></body></html>`;
+
+function serveMirrorFrame(res, quirks) {
+  const body = mirrorFrameDocument(quirks);
+  res.writeHead(200, { "content-type": "text/html; charset=utf-8", "content-length": Buffer.byteLength(body), "cache-control": "no-store",
+    "content-security-policy": MIRROR_FRAME_CSP, "x-content-type-options": "nosniff", "referrer-policy": "no-referrer", "cross-origin-resource-policy": "same-origin" });
+  res.end(body);
+}
+
+const MIRROR_STREAMS_PER_SESSION = 2;
+function serveMirrorStream(req, res, session, grantKey) {
+  const streams = session.mirrorStreams || 0;
+  if (streams >= MIRROR_STREAMS_PER_SESSION) { res.writeHead(429, { "cache-control": "no-store" }); return res.end(); }
+  session.mirrorStreams = streams + 1;
+  res.writeHead(200, { "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff", "x-accel-buffering": "no" });
+  res.write("retry: 2000\n\n");
+  const active = viewerSockets.get(session.id) || new Set(); active.add(res); viewerSockets.set(session.id, active);
+  let closed = false, unsubscribe = () => undefined;
+  const stop = () => {
+    if (closed) return; closed = true; clearInterval(check); unsubscribe();
+    session.mirrorStreams = Math.max(0, (session.mirrorStreams || 1) - 1);
+    active.delete(res); if (active.size === 0 && viewerSockets.get(session.id) === active) viewerSockets.delete(session.id);
+    if (!res.writableEnded) res.end();
+  };
+  const check = setInterval(() => {
+    const grant = viewerGrants.get(grantKey);
+    if (!grant || grant.expiresAt < Date.now() || sessions.get(session.id) !== session) return stop();
+    if (!closed) res.write(": keepalive\n\n");
+  }, 5_000);
+  req.once("close", stop); res.once("close", stop);
+  unsubscribe = subscribeMirror(session, { mode: "mirror", send: (message) => {
+    if (closed) return;
+    // A client that cannot keep up is disconnected rather than buffered without bound.
+    if (res.writableLength > 32 * 1024 * 1024) return stop();
+    res.write(`data: ${JSON.stringify(message)}\n\n`);
+  } });
+}
+
+async function serveMirrorResource(res, session, token) {
+  const engine = mirrorEngines.get(session.id);
+  if (!engine || !/^[A-Za-z0-9_-]{16,64}$/.test(token)) { res.writeHead(404, { "cache-control": "no-store" }); return res.end(); }
+  const item = await engine.resource(token).catch(() => null);
+  if (!item || !item.body) { res.writeHead(item?.status || 404, { "cache-control": "no-store" }); return res.end(); }
+  res.writeHead(200, { "content-type": item.type, "content-length": item.body.length, "cache-control": "private, max-age=300",
+    "x-content-type-options": "nosniff", "content-security-policy": MIRROR_RESOURCE_CSP, "cross-origin-resource-policy": "same-origin", "referrer-policy": "no-referrer" });
+  res.end(item.body);
+}
+
+async function handleMirrorInput(req, res, session) {
+  // Same-origin, JSON-only, cookie-granted, size- and rate-limited.
+  const origin = req.headers.origin;
+  if (origin !== PUBLIC_BASE && origin !== `https://${req.headers.host}` && origin !== `http://${req.headers.host}`) return send(res, 403, { error: "Forbidden" });
+  if (req.headers["sec-fetch-site"] && req.headers["sec-fetch-site"] !== "same-origin") return send(res, 403, { error: "Forbidden" });
+  if (!String(req.headers["content-type"] || "").startsWith("application/json")) return send(res, 415, { error: "Unsupported" });
+  if (!takeInputToken(session.id)) return send(res, 429, { error: "Too many input events" });
+  const chunks = []; let size = 0;
+  for await (const chunk of req) { size += chunk.length; if (size > MIRROR_LIMITS.maxInputBody) return send(res, 413, { error: "Too large" }); chunks.push(chunk); }
+  let value; try { value = JSON.parse(Buffer.concat(chunks).toString("utf8")); } catch { return send(res, 400, { error: "Invalid" }); }
+  const message = validateInputMessage(value);
+  if (!message) return send(res, 400, { error: "Invalid" });
+  const engine = mirrorEngines.get(session.id);
+  if (!engine) return send(res, 409, { ok: false, code: "UNAVAILABLE" });
+  session.lastUsedAt = Date.now();
+  const result = await engine.input(message).catch(() => ({ ok: false, code: "FAILED" }));
+  return send(res, 200, result);
 }
 
 const mimeTypes = new Map([
@@ -441,10 +610,11 @@ const mimeTypes = new Map([
 // never served, only its core/ and vendor/ modules.
 const VIEWER_PAGE = "viewer.html";
 const VIEWER_FILES = new Set([VIEWER_PAGE, "viewer.js", "viewer.css", "viewer-input.js"]);
+const MIRROR_VIEWER_FILES = new Set(["mirror-client.js", "mirror-dom.js", "mirror-protocol.js"]);
 const NOVNC_UI_PAGES = new Set(["vnc.html", "vnc_lite.html", "vnc_auto.html", "index.html", "app/ui.js"]);
 const viewerCsp = (host) => {
   const sameHost = typeof host === "string" && /^[A-Za-z0-9.-]+(?::\d{1,5})?$/.test(host) ? ` wss://${host} ws://${host}` : "";
-  return `default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'${sameHost}; base-uri 'none'; form-action 'none'; frame-ancestors 'self'`;
+  return `default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'${sameHost}; frame-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'self'`;
 };
 
 function viewerFailure(res, status, message, type = "authorization-expired") {
@@ -459,7 +629,7 @@ async function readViewerAsset(upstreamPath) {
   const normalized = path.normalize(pathname).replace(/^\/+/, "");
   if (!normalized || normalized.startsWith("..") || normalized.includes("\\") || normalized === "websockify") return null;
   if (NOVNC_UI_PAGES.has(normalized)) return null;
-  const own = VIEWER_FILES.has(normalized);
+  const own = VIEWER_FILES.has(normalized) || MIRROR_VIEWER_FILES.has(normalized);
   let pending = viewerAssets.get(normalized);
   if (!pending) {
     pending = readFile(`${own ? VIEWER_ROOT : NOVNC_ROOT}/${normalized}`).catch((error) => {
@@ -483,11 +653,28 @@ function serveViewerEvents(req, res, session, grantKey) {
   session.viewerEventStreams = streams + 1;
   res.writeHead(200, { "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff", "x-accel-buffering": "no" });
   res.write("retry: 1000\n\n");
+  res.viewerEvents = true;
   const active = viewerSockets.get(session.id) || new Set(); active.add(res); viewerSockets.set(session.id, active);
-  let closed = false, timer;
-  const heartbeat = setInterval(() => { if (!closed) res.write(": keepalive\n\n"); }, 15_000);
+  let closed = false, timer, unsubscribeFocus = () => undefined;
+  // After "landed" the stream stays open (no more relay polling) so the viewer
+  // learns how the session ended ("closed" event from revokeSessionLive).
+  const heartbeat = setInterval(() => {
+    if (closed) return;
+    const grant = viewerGrants.get(grantKey);
+    if (!grant || grant.expiresAt < Date.now() || sessions.get(session.id) !== session) return stop();
+    touchGrant(grant); res.write(": keepalive\n\n");
+  }, 15_000);
+  // Pixel-mode keyboard fix: forward only {editable, inputType, rect} of the
+  // remote focused element (never values or page addresses).
+  const grantAtStart = viewerGrants.get(grantKey);
+  if (grantAtStart?.focusEvents && grantAtStart.renderer === "pixels") {
+    unsubscribeFocus = subscribeMirror(session, { mode: "focus", send: (message) => {
+      if (closed || message.t !== "focus") return;
+      res.write(`event: focus\ndata: ${JSON.stringify({ editable: message.editable === true, inputType: message.inputType || "", rect: message.rect || null })}\n\n`);
+    } });
+  }
   const stop = () => {
-    if (closed) return; closed = true; clearTimeout(timer); clearInterval(heartbeat);
+    if (closed) return; closed = true; clearTimeout(timer); clearInterval(heartbeat); unsubscribeFocus();
     session.viewerEventStreams = Math.max(0, (session.viewerEventStreams || 1) - 1);
     active.delete(res); if (active.size === 0 && viewerSockets.get(session.id) === active) viewerSockets.delete(session.id);
     if (!res.writableEnded) res.end();
@@ -497,14 +684,23 @@ function serveViewerEvents(req, res, session, grantKey) {
     if (closed) return;
     const grant = viewerGrants.get(grantKey);
     if (!grant || grant.expiresAt < Date.now() || sessions.get(session.id) !== session) return stop();
+    touchGrant(grant);
+    // Dev recording sessions never blank on landing.
+    if (session.devRecording) return;
     try {
       const result = await relayRequest("GET", `/v1/sessions/${session.id}/landed`);
       if (closed) return;
-      if (result?.landed === true) { res.write("event: landed\ndata: {}\n\n"); return stop(); }
+      if (result?.landed === true) {
+        if (!session.landedAt) { session.landedAt = Date.now(); console.log(JSON.stringify({ event: "browser_landed", sessionId: session.id })); }
+        res.write("event: landed\ndata: {}\n\n");
+        return;
+      }
     } catch { /* transient relay failure: keep polling until the grant expires */ }
     timer = setTimeout(tick, LANDED_POLL_MS);
   };
-  void tick();
+  // A reconnecting viewer on an already-landed session is told immediately.
+  if (session.landedAt && !session.devRecording) res.write("event: landed\ndata: {}\n\n");
+  else void tick();
 }
 
 async function serveViewer(req, res, session, upstreamPath) {
@@ -555,15 +751,36 @@ const server = createServer(async (req, res) => {
       liveTokens.delete(hash(redeem[1]));
       if (!entry || entry.expiresAt < Date.now() || !sessions.has(entry.sessionId)) return send(res, 410, { error: "Live-view link expired or already used" });
       const grant = randomBytes(32).toString("base64url");
-      viewerGrants.set(hash(grant), { sessionId: entry.sessionId, relayToken: entry.relayToken, expiresAt: entry.expiresAt });
-      res.writeHead(302, { location: `/viewer/${entry.sessionId}/${VIEWER_PAGE}`, "set-cookie": `browser_view=${grant}; HttpOnly; Secure; SameSite=Strict; Path=/viewer/${entry.sessionId}; Max-Age=300`, "cache-control": "no-store" }); return res.end();
+      const requested = url.searchParams.get("renderer");
+      const renderer = SIGNIN_RENDERER_OVERRIDE && (requested === "mirror" || requested === "pixels") ? requested : SIGNIN_RENDERER;
+      const focusEvents = SIGNIN_PIXEL_FOCUS || (SIGNIN_RENDERER_OVERRIDE && url.searchParams.get("focus") === "1");
+      const now = Date.now(), idleMs = sessions.get(entry.sessionId)?.devRecording === true ? VIEWER_MAX_MS : VIEWER_IDLE_MS;
+      const hardExpiresAt = Math.min(now + VIEWER_MAX_MS, entry.relayExpiresAt || now + VIEWER_IDLE_MS);
+      viewerGrants.set(hash(grant), { sessionId: entry.sessionId, relayToken: entry.relayToken, hardExpiresAt, idleMs, expiresAt: Math.min(hardExpiresAt, now + idleMs), openSockets: 0, renderer, focusEvents });
+      res.writeHead(302, { location: `/viewer/${entry.sessionId}/${VIEWER_PAGE}`, "set-cookie": `browser_view=${grant}; HttpOnly; Secure; SameSite=Strict; Path=/viewer/${entry.sessionId}; Max-Age=${Math.round(VIEWER_MAX_MS / 1000)}`, "cache-control": "no-store" }); return res.end();
     }
     const viewer = /^\/viewer\/([0-9a-f-]+)(\/.*)$/.exec(url.pathname);
     if (viewer && req.method === "GET") {
       const grant = viewerGrants.get(hash(viewerCookie(req) || "")); const session = sessions.get(viewer[1]);
       if (!grant || grant.sessionId !== viewer[1] || grant.expiresAt < Date.now() || !session) return viewerFailure(res, 401, "Secure viewer authorization expired.");
+      touchGrant(grant);
       if (viewer[2] === "/events") return serveViewerEvents(req, res, session, hash(viewerCookie(req) || ""));
+      if (viewer[2] === "/mode") return send(res, 200, { renderer: grant.renderer || "pixels", focusEvents: grant.focusEvents === true });
+      const mirrorPath = /^\/m\/(frame\.html|frame-quirks\.html|stream|r\/([A-Za-z0-9_-]{16,64}))$/.exec(viewer[2]);
+      if (mirrorPath) {
+        if (grant.renderer !== "mirror") return send(res, 404, { error: "Not found" });
+        session.lastUsedAt = Date.now();
+        if (mirrorPath[1] === "frame.html" || mirrorPath[1] === "frame-quirks.html") return serveMirrorFrame(res, mirrorPath[1] === "frame-quirks.html");
+        if (mirrorPath[1] === "stream") return serveMirrorStream(req, res, session, hash(viewerCookie(req) || ""));
+        return serveMirrorResource(res, session, mirrorPath[2]);
+      }
+      if (viewer[2].startsWith("/m/")) return send(res, 404, { error: "Not found" });
       return serveViewer(req, res, session, viewer[2]);
+    }
+    if (viewer && req.method === "POST" && viewer[2] === "/m/input") {
+      const grant = viewerGrants.get(hash(viewerCookie(req) || "")); const session = sessions.get(viewer[1]);
+      if (!grant || grant.sessionId !== viewer[1] || grant.expiresAt < Date.now() || !session || grant.renderer !== "mirror") return send(res, 401, { error: "Secure viewer authorization expired" });
+      return handleMirrorInput(req, res, session);
     }
     const { raw, value } = await readBody(req);
     if (req.method === "POST" && url.pathname === "/v1/internal/navigation-blocked") {
@@ -571,9 +788,12 @@ const server = createServer(async (req, res) => {
       const session = typeof value.sessionId === "string" && sessions.get(value.sessionId);
       const blockedHost = typeof value.blockedHost === "string" && validPublicHostname(value.blockedHost) ? value.blockedHost.toLowerCase() : undefined;
       if (!session) return send(res, 404, { error: "Session not found" });
-      navigationTombstones.set(session.id, { ...(blockedHost ? { blockedHost } : {}), expiresAt: Date.now() + 5 * 60_000 });
-      console.warn(JSON.stringify({ event: "browser_navigation_guard_blocked", sessionId: session.id, ...(blockedHost ? { blockedHost } : {}) }));
-      await removeBrowser(session);
+      const reason = ["disallowed-host", "disallowed-scheme", "guard-unavailable"].includes(value.reason) ? value.reason : "disallowed-host";
+      // An unreachable guard is a browser failure, not a policy violation: no
+      // tombstone, so the app sees 404 and provisions one replacement browser.
+      if (reason !== "guard-unavailable") navigationTombstones.set(session.id, { ...(blockedHost ? { blockedHost } : {}), expiresAt: Date.now() + 5 * 60_000 });
+      console.warn(JSON.stringify({ event: "browser_navigation_guard_blocked", sessionId: session.id, reason, ...(blockedHost ? { blockedHost } : {}) }));
+      await removeBrowser(session, "blocked");
       return send(res, 200, { removed: true });
     }
     if (!authenticate(req, url.pathname, raw)) return send(res, 401, { error: "Unauthorized" });
@@ -581,8 +801,16 @@ const server = createServer(async (req, res) => {
       if (!validOrigin(value.canvasOrigin)) return send(res, 400, { error: "canvasOrigin must be a public HTTPS origin" });
       const authHostRules = validAuthHostRules(value.authHostRules ?? []);
       if (!authHostRules) return send(res, 400, { error: "authHostRules must contain public hostnames", code: "NAVIGATION_BLOCKED" });
-      if (!await resolvesPublicOnly(new URL(value.canvasOrigin).hostname) || !(await Promise.all(authHostRules.map(resolvesPublicOnly))).every(Boolean)) {
-        return send(res, 400, { error: "Institution hosts must resolve only to public addresses", code: "NAVIGATION_BLOCKED" });
+      const canvasDns = await resolvePublicOnly(new URL(value.canvasOrigin).hostname);
+      if (canvasDns === "private") return send(res, 400, { error: "Canvas must resolve only to public addresses", code: "NAVIGATION_BLOCKED" });
+      if (canvasDns !== "public") return send(res, 503, { error: "Canvas could not be resolved. Try again shortly.", code: "DNS_UNAVAILABLE" });
+      // One stale/unresolvable discovered IdP host must not fail the whole
+      // sign-in: drop it (strictly narrower policy) and log which one.
+      const ruleDns = await Promise.all(authHostRules.map(resolvePublicOnly));
+      const dropped = authHostRules.filter((_, i) => ruleDns[i] !== "public");
+      if (dropped.length) {
+        console.warn(JSON.stringify({ event: "browser_auth_hosts_dropped", hosts: dropped, results: ruleDns.filter((r) => r !== "public") }));
+        authHostRules.splice(0, authHostRules.length, ...authHostRules.filter((_, i) => ruleDns[i] === "public"));
       }
       if (value.loginPath !== undefined && value.loginPath !== null && !validLoginPath(value.loginPath)) {
         return send(res, 400, { error: "loginPath must be a Canvas sign-in path", code: "INVALID_LOGIN_PATH" });
@@ -591,7 +819,8 @@ const server = createServer(async (req, res) => {
       const display = validDisplay(value.display ?? DEFAULT_DISPLAY);
       if (!display) return send(res, 400, { error: "display dimensions are invalid", code: "INVALID_DISPLAY" });
       if (sessions.size >= MAX_SESSIONS) return send(res, 429, { error: "Browser host is at capacity", code: "CAPACITY" });
-      const session = await createBrowser(value.canvasOrigin, authHostRules, loginPath, display); return send(res, 201, { id: session.id, state: "starting", display });
+      const session = await createBrowser(value.canvasOrigin, authHostRules, loginPath, display, value.devRecording === true);
+      return send(res, 201, { id: session.id, state: "starting", display, ...(session.devRecording ? { devRecording: true } : {}) });
     }
     if (req.method === "POST" && url.pathname === "/v1/reconcile") {
       if (!Array.isArray(value.ownedSessionIds) || value.ownedSessionIds.length > 10_000 ||
@@ -634,9 +863,10 @@ const server = createServer(async (req, res) => {
     if (req.method === "POST" && match[2] === "live") {
       const startedAt = Date.now();
       await revokeSessionLive(session.id);
-      const relayCapability = await relayRequest("POST", `/v1/sessions/${session.id}/capability`, { kind: "viewer", ttlSeconds: 300 });
+      const relayCapability = await relayRequest("POST", `/v1/sessions/${session.id}/capability`, { kind: "viewer", ttlSeconds: Math.round(VIEWER_MAX_MS / 1000) });
+      // The one-time /live link itself must still be redeemed within five minutes.
       const token = randomBytes(32).toString("base64url"); const expiresAt = Date.now() + 5 * 60_000;
-      liveTokens.set(hash(token), { sessionId: session.id, relayToken: relayCapability.token, expiresAt });
+      liveTokens.set(hash(token), { sessionId: session.id, relayToken: relayCapability.token, relayExpiresAt: Number(relayCapability.expiresAt) || expiresAt, expiresAt });
       console.log(JSON.stringify({ event: "live_url_issued", durationMs: Date.now() - startedAt }));
       return send(res, 201, { url: `/live/${token}`, expiresAt });
     }
@@ -645,10 +875,10 @@ const server = createServer(async (req, res) => {
       return send(res, 200, { navigated: true });
     }
     if (req.method === "POST" && match[2] === "revoke-live") {
-      await revokeSessionLive(session.id);
+      await revokeSessionLive(session.id, value.reason === "signed-in" ? "signed-in" : "ended");
       return send(res, 200, { revoked: true });
     }
-    if (req.method === "DELETE" && !match[2]) { await removeBrowser(session); return send(res, 200, { terminated: true }); }
+    if (req.method === "DELETE" && !match[2]) { await removeBrowser(session, value.reason === "signed-in" ? "signed-in" : "ended"); return send(res, 200, { terminated: true }); }
     return send(res, 404, { error: "Not found" });
   } catch (error) {
     if (error instanceof Error && error.message === "Interactive navigation is not allowed") {
@@ -691,7 +921,8 @@ server.on("upgrade", (req, socket, head) => {
     upstream.on("upgrade", (response, upstreamSocket, upstreamHead) => {
       const current = viewerGrants.get(grantKey);
       if (current !== grant || current?.expiresAt < Date.now() || sessions.get(session.id) !== session) { upstreamSocket.destroy(); socket.destroy(); return; }
-      settled = true;
+      settled = true; touchGrant(grant);
+      grant.openSockets = (grant.openSockets || 0) + 1; socket.once("close", () => { grant.openSockets = Math.max(0, (grant.openSockets || 1) - 1); });
       active.add(upstreamSocket); upstreamSocket.once("close", () => removeActive(upstreamSocket));
       socket.write(`HTTP/1.1 101 Switching Protocols\r\n${Object.entries(response.headers).map(([k, v]) => `${k}: ${v}`).join("\r\n")}\r\n\r\n`);
       if (head.length) upstreamSocket.write(head); if (upstreamHead.length) socket.write(upstreamHead); upstreamSocket.pipe(socket).pipe(upstreamSocket);
@@ -711,6 +942,8 @@ setInterval(() => {
   const now = Date.now();
   for (const [nonce, expires] of nonces) if (expires < now) nonces.delete(nonce);
   for (const [key, item] of liveTokens) if (item.expiresAt < now) liveTokens.delete(key);
+  // An open viewer websocket keeps its grant alive (up to the hard cap).
+  for (const item of viewerGrants.values()) if (item.openSockets > 0 && item.expiresAt >= now) touchGrant(item);
   for (const [key, item] of viewerGrants) if (item.expiresAt < now) viewerGrants.delete(key);
   for (const [key, item] of connectTokens) if (item.expiresAt < now) connectTokens.delete(key);
   for (const [id, item] of navigationTombstones) if (item.expiresAt < now) navigationTombstones.delete(id);

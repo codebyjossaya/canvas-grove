@@ -63,6 +63,14 @@ services:
       BROWSER_RELAY_SECRET: ${BROWSER_RELAY_CONTROL_SECRET:?Set BROWSER_RELAY_CONTROL_SECRET}
       BROWSER_IDLE_TTL_SECONDS: ${BROWSER_IDLE_TTL_SECONDS:-1800}
       BROWSER_REGISTRY_PATH: /var/lib/canvas-grove/state/registry.json
+      # Sign-in renderer: pixels (default) | mirror. The ?renderer= override is
+      # honoured only with SIGNIN_RENDERER_OVERRIDE=allow (dev/test only).
+      SIGNIN_RENDERER: ${SIGNIN_RENDERER:-pixels}
+      SIGNIN_RENDERER_OVERRIDE: ${SIGNIN_RENDERER_OVERRIDE:-deny}
+      SIGNIN_PIXEL_FOCUS: ${SIGNIN_PIXEL_FOCUS:-off}
+      # Dev-only quiz-flow recording sessions (devRecording:true on POST /v1/sessions):
+      # no landed blanking, 30-minute viewer. Only "allow" enables it.
+      BROWSER_DEV_RECORDING: ${BROWSER_DEV_RECORDING:-deny}
     volumes:
       - browser_profiles:/var/lib/canvas-grove/browser-profiles
       - browser_orchestrator_state:/var/lib/canvas-grove/state
@@ -208,6 +216,7 @@ services:
       SYNC_WORKER_CONCURRENCY: ${SYNC_WORKER_CONCURRENCY:-4}
       SYNC_WORKER_POLL_MS: ${SYNC_WORKER_POLL_MS:-3000}
       CANVAS_KEEPALIVE_MINUTES: ${CANVAS_KEEPALIVE_MINUTES:-10}
+      CANVAS_PAGE_KEEPALIVE: ${CANVAS_PAGE_KEEPALIVE:-1}
     depends_on:
       migrate:
         condition: service_completed_successfully

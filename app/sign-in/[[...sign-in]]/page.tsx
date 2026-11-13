@@ -1,12 +1,6 @@
 import { SignIn } from "@clerk/nextjs";
-import { Suspense } from "react";
+import { AuthStage } from "@/components/auth/auth-stage";
 
 export default function SignInPage() {
-  return (
-    <div className="flex min-h-dvh items-center justify-center px-4 py-8">
-      <Suspense>
-        <SignIn />
-      </Suspense>
-    </div>
-  );
+  return <AuthStage finishing="Signing you in…"><SignIn /></AuthStage>;
 }

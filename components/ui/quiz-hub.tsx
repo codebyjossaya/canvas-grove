@@ -1,8 +1,9 @@
 "use client";
 
-import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { formatInstant } from "@/lib/time";
+import { courseColor } from "@/lib/views/build";
+import { AppLink } from "./app-link";
 import type { QuizSummary } from "./quiz-types";
 import { useDisplayTimeZone } from "./use-display-timezone";
 import styles from "./quiz-hub.module.css";
@@ -47,7 +48,7 @@ export function QuizHub() {
 
   return <section className={styles.hub} aria-labelledby="quiz-hub-title">
     <div className={styles.hubHead}>
-      <div><p className="eyebrow">Assessment workspace</p><h2 id="quiz-hub-title">Quiz worklist</h2><p>Available and active quizzes stay upfront. Submitted work moves to History.</p></div>
+      <h2 id="quiz-hub-title" className="sr-only">Quiz worklist</h2>
       <div className={styles.freshness}><span className={freshness?.lastErrorCode || freshness?.stale ? styles.stale : styles.fresh} role="status" aria-live="polite"><i aria-hidden="true" />{busy ? "Refreshing in background" : freshness?.stale ? "Update due" : freshness?.lastSuccessAt ? `Updated ${relative(freshness.lastSuccessAt, timeZone)}` : "Not synced yet"}</span><button disabled={refreshing} onClick={() => void load(true)}>{refreshing ? "Requesting…" : "Refresh"}</button></div>
     </div>
 
@@ -68,13 +69,13 @@ function QuizRow({ quiz, timeZone }: { quiz: QuizSummary; timeZone: string }) {
   const blocked = quiz.status === "unsupported" || quiz.status === "locked";
   const historical = ["completed", "past_due", "attempts_exhausted"].includes(quiz.status);
   const action = quiz.status === "in_progress" ? "Resume" : quiz.retakeAllowed ? "Review & retake" : historical ? "View details" : "Prepare";
-  return <article className={styles.row} role="row">
+  return <article className={`${styles.row} c${courseColor(quiz.courseId)}`} role="row">
     <div className={styles.title} role="cell"><span className={styles.mobileLabel}>Assessment</span><strong>{quiz.title}</strong><small>{quiz.questionCount == null ? "Question count unavailable" : `${quiz.questionCount} questions`}{quiz.timeLimitMinutes ? ` · ${quiz.timeLimitMinutes} min` : ""}</small></div>
     <div className={styles.course} role="cell"><span className={styles.mobileLabel}>Course</span><strong>{quiz.courseCode || quiz.courseName}</strong><small>{quiz.courseName}</small></div>
     <div role="cell"><span className={styles.mobileLabel}>Due</span><time dateTime={quiz.dueAt ?? undefined}>{quiz.dueAt ? shortDate(quiz.dueAt, timeZone) : "No due date"}</time></div>
     <div role="cell"><span className={styles.mobileLabel}>Status</span><Status status={quiz.status} stale={Boolean(quiz.statusStale)} /></div>
     <div role="cell"><span className={styles.mobileLabel}>Attempts</span><span>{attemptLabel(quiz)}</span></div>
-    <div className={styles.action} role="cell">{blocked ? <span title={quiz.supportReason || undefined}>Use Canvas</span> : <Link href={`/quizzes/${quiz.id}`}>{action}<b aria-hidden="true">→</b></Link>}</div>
+    <div className={styles.action} role="cell">{blocked ? <span title={quiz.supportReason || undefined}>Use Canvas</span> : <AppLink href={`/quizzes/${quiz.id}`}>{action}<b aria-hidden="true">→</b></AppLink>}</div>
   </article>;
 }
 

@@ -1,7 +1,7 @@
 import { chromium } from "playwright-core";
 
 const target = process.env.VIEWER_ACCEPTANCE_URL;
-const base = process.env.VIEWER_ACCEPTANCE_BASE ?? "https://desktop-lnvmg14.tail8dc4e4.ts.net";
+const base = process.env.VIEWER_ACCEPTANCE_BASE ?? "https://canvas-grove.tail8dc4e4.ts.net";
 const executablePath = process.env.VIEWER_ACCEPTANCE_CHROME ?? "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe";
 if (!target) throw new Error("VIEWER_ACCEPTANCE_URL is required");
 

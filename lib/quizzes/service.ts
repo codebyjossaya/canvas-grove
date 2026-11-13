@@ -4,10 +4,14 @@ import { withTenantTransaction } from "@/lib/db";
 import { canvasAccounts, quizAttempts, quizzes, syncCursors, syncJobs, syncPolicies } from "@/lib/db/schema";
 import { tenantRepository } from "@/lib/db/repository";
 import { and, desc, eq, inArray } from "drizzle-orm";
-import { executeCanvasApiForSession, hostedSessionStore } from "@/lib/bridge/hosted-browser";
+import { canvasApiForSession, executeCanvasApiForSession, hostedSessionStore } from "@/lib/bridge/hosted-browser";
+import { BridgeError } from "@/lib/bridge/errors";
+import { healthEventRow } from "@/lib/canvas/session-health";
 import { runSingleFlight } from "@/lib/bridge/single-flight";
 import type { CanvasRequest } from "@/lib/bridge/types";
-import { answerRequest, deriveQuizStatus, flagRequest, isRecord, normalizeAnswer, questionHasUnsupportedMedia, quizFailure, restrictionReason, safeQuizHtml, sanitizeQuestion, startRequest, submitRequest, timeRequest, validateOptionAnswer, SUPPORTED_CLASSIC_QUESTION_TYPES, type QuizStatus } from "./contracts";
+import { answerRequest, deriveQuizStatus, flagRequest, isRecord, normalizeAnswer, questionHasUnsupportedMedia, quizFailure, restrictionReason, safeQuizHtml, sanitizeQuestion, startRequest, submitRequest, timeRequest, validateOptionAnswer, SUPPORTED_CLASSIC_QUESTION_TYPES, QuizInputError, type QuizStatus } from "./contracts";
+import { renderCanvasHtml } from "@/lib/views/canvas-html";
+import { oqaatBackup, oqaatLoadAttempt, oqaatLoadPage, oqaatNavigate, oqaatStart, oqaatSubmit, type OqaatIds, type QuizWebClient } from "./oqaat";
 
 type CanvasResult = { ok: boolean; status: number; authRequired: boolean; data?: unknown };
 type QuizRow = NonNullable<Awaited<ReturnType<ReturnType<typeof tenantRepository>["getQuiz"]>>>;
@@ -36,9 +40,53 @@ async function callCanvas(ctx: AuthContext, request: CanvasRequest): Promise<Can
   return result;
 }
 
+/** Question/option HTML for the client: Canvas images and equations rewritten to Grove's proxy, styles stripped. */
+async function presentQuestions<T extends { questionTextHtml: string; options: { textHtml: string }[] }>(ctx: AuthContext, questions: T[]): Promise<T[]> {
+  if (!questions.length) return questions;
+  const { canvasOrigin } = await activeSession(ctx);
+  return questions.map((question) => ({ ...question, questionTextHtml: renderCanvasHtml(question.questionTextHtml, canvasOrigin), options: question.options.map((option) => ({ ...option, textHtml: renderCanvasHtml(option.textHtml, canvasOrigin) })) }));
+}
+
 function canvasId(value: string) {
   if (!/^\d+$/.test(value)) throw new QuizServiceError("INVALID_CANVAS_ID", "Canvas returned an invalid quiz identifier.");
   return value;
+}
+
+// ---------------------------------------------------------------- one question at a time
+// These quizzes run through Canvas's own player routes (lib/quizzes/oqaat.ts),
+// sharing one cookie-jar client per operation so rotations persist once.
+function quizMode(row: QuizRow) {
+  const source = isRecord(row.quiz.sourcePayload) ? row.quiz.sourcePayload : {};
+  return { oneQuestionAtATime: source.oneQuestionAtATime === true, cantGoBack: source.cantGoBack === true };
+}
+function oqaatIds(row: QuizRow): OqaatIds { return { courseId: canvasId(row.canvasCourseId), quizId: canvasId(row.quiz.canvasQuizId) }; }
+function asServiceError(error: unknown) {
+  if (error instanceof QuizInputError) return new QuizServiceError(error.code, error.message, error.status);
+  if (error instanceof BridgeError && error.code === "CANVAS_SESSION_EXPIRED") return new QuizServiceError("CANVAS_AUTH_EXPIRED", "Canvas sign-in has expired. Reconnect Canvas, then return to the quiz.", 401);
+  return error;
+}
+async function withQuizWeb<T>(ctx: AuthContext, work: (web: QuizWebClient) => Promise<T>): Promise<T> {
+  const session = await activeSession(ctx);
+  const client = canvasApiForSession(session, ctx.clerkUserId);
+  const web: QuizWebClient = {
+    webRequest: async (request) => {
+      const result = await client.webRequest(request);
+      // Same rule as API calls: a login/SSO redirect or an "unauthenticated" 401 expires the session.
+      if (result.authRequired) await hostedSessionStore.updateForOwner(session.id, ctx.clerkUserId, { state: "auth-expired", lastError: "CANVAS_SESSION_EXPIRED" });
+      return result;
+    },
+  };
+  try { return await work(web); }
+  catch (error) { throw asServiceError(error); }
+  finally {
+    await client.flush().catch(() => undefined);
+    const row = healthEventRow(client.stats(), { ownerId: session.userId, hostedSessionId: session.id, kind: "api" });
+    if (row) await hostedSessionStore.recordHealthEvent(session.id, ctx.clerkUserId, row).catch(() => undefined);
+  }
+}
+async function canvasUserId(ctx: AuthContext) {
+  const self = await callCanvas(ctx, { method: "GET", path: "/api/v1/users/self" });
+  return canvasId(isRecord(self.data) ? String(self.data.id ?? "") : "");
 }
 
 function asDate(value: unknown) { return typeof value === "string" && !Number.isNaN(Date.parse(value)) ? new Date(value) : null; }
@@ -222,11 +270,11 @@ export async function getQuizPreflight(ctx: AuthContext, quizId: string, options
       }
       const incomplete = questions.find(questionHasUnsupportedMedia);
       if (incomplete) {
-        const blocked = { ...availability, status: "unsupported" as const, reason: "This quiz contains image, media, SVG, or math content that native Quiz Mode cannot reproduce faithfully. Open it in Canvas.", canStart: false };
+        const blocked = { ...availability, status: "unsupported" as const, reason: "This quiz contains audio, video, or embedded content that native Quiz Mode cannot play. Open it in Canvas.", canStart: false };
         return { quiz: publicQuiz(refreshed, blocked), availability: blocked, attempts: { used: availability.attemptsUsed, remaining: availability.attemptsRemaining }, activeAttempt: null, formatVerification, startWarning };
       }
     } catch (error) {
-      if (error instanceof QuizServiceError && error.code === "QUIZ_RESTRICTED") {
+      if (error instanceof QuizServiceError && ["QUIZ_RESTRICTED", "QUIZ_PERMISSION_DENIED"].includes(error.code)) {
         formatVerification = "after_start";
         startWarning = "Canvas hides this quiz's question formats until an attempt starts. Starting consumes an attempt and may start its timer. Quiz Mode will check every question immediately; if native mode cannot reproduce one safely, your active attempt will be preserved and you will continue in Canvas.";
       } else {
@@ -254,6 +302,7 @@ async function persistAttempt(ctx: AuthContext, quizId: string, value: Record<st
 }
 
 async function attemptBundle(ctx: AuthContext, row: QuizRow, submission: Record<string, unknown>) {
+  if (quizMode(row).oneQuestionAtATime) return oqaatBundle(ctx, row, submission);
   await persistAttempt(ctx, row.quiz.id, submission);
   const submissionId = canvasId(String(submission.id));
   const [questionsOutcome, timeOutcome] = await Promise.allSettled([
@@ -275,12 +324,44 @@ async function attemptBundle(ctx: AuthContext, row: QuizRow, submission: Record<
   }
   const rawQuestions = questionsOutcome.value;
   const incomplete = rawQuestions.filter(isRecord).find(questionHasUnsupportedMedia);
-  if (incomplete) return externalOnly("UNSUPPORTED_QUESTION_MEDIA", "This attempt contains image, media, SVG, or math content that native Quiz Mode cannot reproduce faithfully. Your active attempt has been preserved; continue it directly in Canvas.");
+  if (incomplete) return externalOnly("UNSUPPORTED_QUESTION_MEDIA", "This attempt contains audio, video, or embedded content that native Quiz Mode cannot play. Your active attempt has been preserved; continue it directly in Canvas.");
   const questions = rawQuestions.filter(isRecord).map(sanitizeQuestion);
   const supportedUiTypes = new Set(["multiple_choice", "true_false", "multiple_answers", "short_answer", "essay", "numerical", "calculated"]);
   const unsupported = questions.find((question) => !supportedUiTypes.has(question.type));
   if (unsupported) return externalOnly("UNSUPPORTED_QUESTION_TYPE", `Question ${unsupported.position || ""} uses a Canvas type native Quiz Mode cannot safely save. Your active attempt has been preserved; continue it directly in Canvas.`);
-  return { attempt: publicAttempt(submission), questions, timing, nativeSupported: true as const, nativeBlock: null };
+  return { attempt: publicAttempt(submission), questions: await presentQuestions(ctx, questions), timing, nativeSupported: true as const, nativeBlock: null };
+}
+
+async function oqaatBundle(ctx: AuthContext, row: QuizRow, submission: Record<string, unknown>) {
+  await persistAttempt(ctx, row.quiz.id, submission);
+  const submissionId = canvasId(String(submission.id));
+  const mode = quizMode(row);
+  const [loadOutcome, timeOutcome] = await Promise.allSettled([
+    withQuizWeb(ctx, (web) => oqaatLoadAttempt(web, oqaatIds(row), { cantGoBack: mode.cantGoBack })),
+    callCanvas(ctx, timeRequest(row.canvasCourseId, row.quiz.canvasQuizId, submissionId)),
+  ]);
+  const time = timeOutcome.status === "fulfilled" && isRecord(timeOutcome.value.data) ? timeOutcome.value.data : null;
+  const page = loadOutcome.status === "fulfilled" ? loadOutcome.value.current : null;
+  const timing = time
+    ? { startedAt: submission.started_at ?? null, expiresAt: time.end_at ?? submission.end_at ?? null, secondsRemaining: asNumber(time.time_left), stale: false, error: null }
+    : { startedAt: submission.started_at ?? null, expiresAt: page?.timing.endAt ?? submission.end_at ?? null, secondsRemaining: page?.timing.timeLeftSeconds ?? null, stale: true, error: "Canvas timer is unavailable." };
+  const navigation = { oneQuestionAtATime: true as const, cantGoBack: mode.cantGoBack, currentQuestionId: page?.question.id ?? null };
+  const externalOnly = (code: string, message: string) => ({
+    attempt: publicAttempt(submission), questions: [], timing, nativeSupported: false as const,
+    nativeBlock: { code, message, canvasUrl: row.quiz.htmlUrl }, navigation,
+  });
+  if (loadOutcome.status === "rejected") {
+    const error = loadOutcome.reason;
+    if (error instanceof QuizServiceError && ["QUIZ_PAGE_UNRECOGNIZED", "QUIZ_QUESTION_UNAVAILABLE", "QUIZ_ATTEMPT_CHANGED", "QUIZ_TOO_LARGE", "QUIZ_RESTRICTED", "QUIZ_PERMISSION_DENIED", "CANVAS_QUIZ_UNEXPECTED"].includes(error.code)) {
+      return externalOnly(error.code, `${error.message.replace(/ Your attempt is preserved; continue it in Canvas\.$/, "")} Your Canvas attempt is still active; continue it directly in Canvas.`);
+    }
+    throw error;
+  }
+  const { current, pages } = loadOutcome.value;
+  if (current.submissionId !== submissionId) return externalOnly("QUIZ_ATTEMPT_CHANGED", "Canvas is showing a different attempt than Quiz Mode expected. Your Canvas attempt is still active; continue it directly in Canvas.");
+  const blocked = pages.find((item) => item.unsupported);
+  if (blocked?.unsupported) return externalOnly(blocked.unsupported.code, blocked.unsupported.message);
+  return { attempt: publicAttempt(submission), questions: await presentQuestions(ctx, pages.map((item) => item.question)), timing, nativeSupported: true as const, nativeBlock: null, navigation };
 }
 
 export async function getCurrentAttempt(ctx: AuthContext, quizId: string) {
@@ -320,7 +401,15 @@ async function startAttemptOnce(ctx: AuthContext, quizId: string, confirmed: boo
   if (!preflight.availability.canStart) throw new QuizServiceError("QUIZ_NOT_STARTABLE", preflight.availability.reason ?? "This quiz cannot be started.", 409);
   const row = await tenantRepository(ctx).getQuiz(quizId); if (!row) throw new QuizServiceError("QUIZ_NOT_FOUND", "Quiz not found.", 404);
   let submission: Record<string, unknown> | null = null;
-  try { submission = firstSubmission((await callCanvas(ctx, startRequest(row.canvasCourseId, row.quiz.canvasQuizId))).data); }
+  try {
+    if (quizMode(row).oneQuestionAtATime) {
+      // Same request as Canvas's "Take the Quiz" button; the API reread is authoritative.
+      const userId = await canvasUserId(ctx);
+      await withQuizWeb(ctx, (web) => oqaatStart(web, oqaatIds(row), userId));
+      const started = await submissionState(ctx, row);
+      submission = isActiveSubmission(started) ? started : null;
+    } else submission = firstSubmission((await callCanvas(ctx, startRequest(row.canvasCourseId, row.quiz.canvasQuizId))).data);
+  }
   catch (error) {
     // A transport failure can happen after Canvas consumed the attempt. Always
     // reread before reporting failure so the UI never offers another start
@@ -360,6 +449,7 @@ export async function saveAnswer(ctx: AuthContext, quizId: string, questionId: s
 }
 async function saveAnswerOnce(ctx: AuthContext, quizId: string, questionId: string, answer: unknown, flagged: boolean | undefined, revision: number) {
   const row = await tenantRepository(ctx).getQuiz(quizId); if (!row) throw new QuizServiceError("QUIZ_NOT_FOUND", "Quiz not found.", 404);
+  if (quizMode(row).oneQuestionAtATime) return oqaatSaveAnswer(ctx, row, questionId, answer, flagged, revision);
   const { submission, token } = await currentWithToken(ctx, row);
   const bundle = await attemptBundle(ctx, row, submission);
   const question = bundle.questions.find((item) => item.id === questionId);
@@ -377,6 +467,50 @@ async function saveAnswerOnce(ctx: AuthContext, quizId: string, questionId: stri
   return { saved: true, revision: revision + 1, question: returned ? sanitizeQuestion(returned) : { ...question, answer: normalized, flagged: flagged ?? question.flagged }, savedAt: new Date().toISOString(), timing: { startedAt: submission.started_at ?? null, expiresAt: timeData?.end_at ?? submission.end_at ?? null, secondsRemaining: asNumber(timeData?.time_left), stale: !timeData, error: timeData ? null : "Canvas timer is unavailable." } };
 }
 
+async function activeOqaatSubmission(ctx: AuthContext, row: QuizRow) {
+  const submission = await submissionState(ctx, row);
+  if (!submission || !isActiveSubmission(submission)) throw new QuizServiceError("NO_ACTIVE_ATTEMPT", "This Canvas attempt is no longer active.", 409);
+  return submission;
+}
+
+/** One GET of that question's page (fresh tokens and stored answer), then the player's backup PUT. */
+async function oqaatSaveAnswer(ctx: AuthContext, row: QuizRow, questionId: string, answer: unknown, flagged: boolean | undefined, revision: number) {
+  const submission = await activeOqaatSubmission(ctx, row);
+  const ids = oqaatIds(row);
+  const { page, saved } = await withQuizWeb(ctx, async (web) => {
+    const page = await oqaatLoadPage(web, ids, canvasId(questionId));
+    if (page.submissionId !== String(submission.id)) throw new QuizServiceError("ATTEMPT_CHANGED", "Canvas is now on a different attempt. Reload before saving.", 409);
+    return { page, saved: await oqaatBackup(web, ids, page, { answer, flagged }) };
+  });
+  return {
+    saved: true, revision: revision + 1, question: { ...page.question, answer: saved.answer, flagged: saved.flagged }, savedAt: new Date().toISOString(),
+    timing: { startedAt: submission.started_at ?? null, expiresAt: saved.endAt ?? submission.end_at ?? null, secondsRemaining: saved.timeLeftSeconds, stale: saved.timeLeftSeconds == null, error: saved.timeLeftSeconds == null ? "Canvas timer is unavailable." : null },
+  };
+}
+
+/**
+ * Canvas-side Next/Previous for one-question-at-a-time quizzes (record_answer).
+ * Free-navigation quizzes do not need it (every question is loaded); it is the
+ * only way forward when a quiz forbids going back.
+ */
+export async function navigateAttempt(ctx: AuthContext, quizId: string, fromQuestionId: string, target: "next" | "previous" | string) {
+  return runSingleFlight(mutationFlights, `navigate:${ctx.ownerId}:${quizId}`, async () => {
+    const row = await tenantRepository(ctx).getQuiz(quizId); if (!row) throw new QuizServiceError("QUIZ_NOT_FOUND", "Quiz not found.", 404);
+    const mode = quizMode(row);
+    if (!mode.oneQuestionAtATime) throw new QuizServiceError("QUIZ_NAVIGATION_NOT_NEEDED", "This quiz shows every question at once.", 409);
+    const submission = await activeOqaatSubmission(ctx, row);
+    const ids = oqaatIds(row);
+    const next = await withQuizWeb(ctx, async (web) => {
+      const page = await oqaatLoadPage(web, ids, canvasId(fromQuestionId));
+      if (page.submissionId !== String(submission.id)) throw new QuizServiceError("ATTEMPT_CHANGED", "Canvas is now on a different attempt. Reload before continuing.", 409);
+      return oqaatNavigate(web, ids, page, target, { cantGoBack: mode.cantGoBack });
+    });
+    if (next.unsupported) throw new QuizServiceError(next.unsupported.code, next.unsupported.message, 409);
+    const [question] = await presentQuestions(ctx, [next.question]);
+    return { questionId: next.question.id, question, previousQuestionId: mode.cantGoBack ? null : next.previousQuestionId, nextQuestionId: next.nextQuestionId };
+  }) as Promise<{ questionId: string; question: Awaited<ReturnType<typeof oqaatLoadPage>>["question"]; previousQuestionId: string | null; nextQuestionId: string | null }>;
+}
+
 export async function submitAttempt(ctx: AuthContext, quizId: string, confirmSubmit: boolean, expectedAttempt: number, pendingSaves: number) {
   return runSingleFlight(mutationFlights, `submit:${ctx.ownerId}:${quizId}:${expectedAttempt}`, () => submitAttemptOnce(ctx, quizId, confirmSubmit, expectedAttempt, pendingSaves)) as Promise<Awaited<ReturnType<typeof submitAttemptOnce>>>;
 }
@@ -386,6 +520,7 @@ async function submitAttemptOnce(ctx: AuthContext, quizId: string, confirmSubmit
   const row = await tenantRepository(ctx).getQuiz(quizId); if (!row) throw new QuizServiceError("QUIZ_NOT_FOUND", "Quiz not found.", 404);
   const existing = await submissionState(ctx, row);
   if (existing && (existing.finished_at || ["complete", "pending_review"].includes(String(existing.workflow_state)))) return { submitted: true, replay: true, receipt: publicAttempt(existing) };
+  if (quizMode(row).oneQuestionAtATime) return submitOqaat(ctx, row, quizId, existing, expectedAttempt);
   const { submission, token } = await currentWithToken(ctx, row);
   if (Number(submission.attempt) !== expectedAttempt) throw new QuizServiceError("ATTEMPT_CHANGED", "Canvas is now on a different attempt. Reload before submitting.", 409);
   const nativeBundle = await attemptBundle(ctx, row, submission);
@@ -402,6 +537,34 @@ async function submitAttemptOnce(ctx: AuthContext, quizId: string, confirmSubmit
   // confirmed Canvas submission was unconfirmed merely because our DB/sync
   // queue had a transient failure.
   const completed = { ...(firstSubmission(result.data) ?? submission), workflow_state: firstSubmission(result.data)?.workflow_state ?? "complete", finished_at: firstSubmission(result.data)?.finished_at ?? new Date().toISOString() };
+  return finishSubmit(ctx, row, quizId, completed);
+}
+
+async function submitOqaat(ctx: AuthContext, row: QuizRow, quizId: string, existing: Record<string, unknown> | null, expectedAttempt: number) {
+  if (!existing || !isActiveSubmission(existing)) throw new QuizServiceError("NO_ACTIVE_ATTEMPT", "This Canvas attempt is no longer active.", 409);
+  if (Number(existing.attempt) !== expectedAttempt) throw new QuizServiceError("ATTEMPT_CHANGED", "Canvas is now on a different attempt. Reload before submitting.", 409);
+  const nativeBundle = await attemptBundle(ctx, row, existing);
+  if (!nativeBundle.nativeSupported) throw new QuizServiceError("QUIZ_NATIVE_SUBMIT_BLOCKED", "This attempt contains content native Quiz Mode cannot reproduce safely. Continue and submit it directly in Canvas.", 409);
+  const ids = oqaatIds(row);
+  const isDone = (value: Record<string, unknown> | null) => Boolean(value && String(value.id) === String(existing.id) && isCompletedSubmission(value));
+  try {
+    await withQuizWeb(ctx, async (web) => {
+      const page = await oqaatLoadPage(web, ids);
+      if (page.submissionId !== String(existing.id) || page.attempt !== expectedAttempt) throw new QuizServiceError("ATTEMPT_CHANGED", "Canvas is now on a different attempt. Reload before submitting.", 409);
+      return oqaatSubmit(web, ids, page);
+    });
+  } catch (error) {
+    const reread = await submissionState(ctx, row).catch(() => null);
+    if (isDone(reread)) return { submitted: true, replay: true, receipt: publicAttempt(reread!) };
+    throw error;
+  }
+  // The player answers with a redirect only; the API is the authoritative receipt.
+  const reread = await submissionState(ctx, row).catch(() => null);
+  if (!isDone(reread)) throw new QuizServiceError("QUIZ_SUBMIT_UNCONFIRMED", "Canvas accepted the submit request but has not reported the attempt as complete. Check the quiz in Canvas before retrying.", 502);
+  return finishSubmit(ctx, row, quizId, reread!);
+}
+
+async function finishSubmit(ctx: AuthContext, row: QuizRow, quizId: string, completed: Record<string, unknown>) {
   const warnings: string[] = [];
   try { await persistAttempt(ctx, quizId, completed); } catch (error) { console.error("quiz_attempt_receipt_persist_failed", { quizId, error: error instanceof Error ? error.message : "unknown" }); warnings.push("receipt_cache_pending"); }
   try { await enqueuePostSubmitSync(ctx, row); } catch (error) { console.error("quiz_submit_sync_enqueue_failed", { quizId, error: error instanceof Error ? error.message : "unknown" }); warnings.push("resync_pending"); }

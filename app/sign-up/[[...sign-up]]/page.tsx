@@ -1,12 +1,6 @@
 import { SignUp } from "@clerk/nextjs";
-import { Suspense } from "react";
+import { AuthStage } from "@/components/auth/auth-stage";
 
 export default function SignUpPage() {
-  return (
-    <div className="flex min-h-dvh items-center justify-center px-4 py-8">
-      <Suspense>
-        <SignUp />
-      </Suspense>
-    </div>
-  );
+  return <AuthStage finishing="Setting up your account…"><SignUp /></AuthStage>;
 }

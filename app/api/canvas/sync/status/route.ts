@@ -25,8 +25,8 @@ export async function GET() {
   if (!session.isAuthenticated || !session.userId) return errorJson(new Error("Authentication required"), 401);
   const ctx = await ensureUserForClerk(session.userId);
   const result = await withTenantTransaction(ctx.ownerId, async (tx) => {
-    const cursors = await tx.select().from(syncCursors).where(eq(syncCursors.ownerId, ctx.ownerId));
-    const recentJobs = await tx.select().from(syncJobs).where(and(eq(syncJobs.ownerId, ctx.ownerId))).orderBy(desc(syncJobs.createdAt)).limit(50);
+    const cursors = await tx.select({ canvasAccountId: syncCursors.canvasAccountId, resourceType: syncCursors.resourceType, scopeKey: syncCursors.scopeKey, lastSuccessAt: syncCursors.lastSuccessAt, lastAttemptAt: syncCursors.lastAttemptAt, consecutiveFailures: syncCursors.consecutiveFailures, lastErrorCode: syncCursors.lastErrorCode }).from(syncCursors).where(eq(syncCursors.ownerId, ctx.ownerId));
+    const recentJobs = await tx.select({ id: syncJobs.id, canvasAccountId: syncJobs.canvasAccountId, kind: syncJobs.kind, status: syncJobs.status, attempt: syncJobs.attempt, runAfter: syncJobs.runAfter, finishedAt: syncJobs.finishedAt, errorCode: syncJobs.errorCode, scope: syncJobs.scope }).from(syncJobs).where(and(eq(syncJobs.ownerId, ctx.ownerId))).orderBy(desc(syncJobs.createdAt)).limit(50);
     return { cursors, recentJobs };
   });
   const now = Date.now();

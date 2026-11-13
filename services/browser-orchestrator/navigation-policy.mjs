@@ -38,6 +38,50 @@ export function isTrustedIdentityHost(host) {
   return Boolean(h) && TRUSTED_IDENTITY_PROVIDER_SUFFIXES.some((s) => h === s || h.endsWith(`.${s}`));
 }
 
+// Egress-only subresource hosts (copy of services/browser-network-policy.mjs,
+// asserted identical by tests/mirror-policy.test.mjs). Used ONLY by the DOM
+// mirror's subresource proxy to decide which images/fonts/stylesheets it may
+// ask the remote browser to supply; they are never navigable.
+export const EGRESS_ONLY_SUFFIXES = Object.freeze([
+  "inscloudgate.net",
+  "canvas-user-content.com",
+  "msauth.net",
+  "msftauth.net",
+  "msftauthimages.net",
+  "msauthimages.net",
+  "oktacdn.com",
+  "ssl.gstatic.com",
+  "www.gstatic.com",
+  "cdnjs.cloudflare.com",
+  "cdn.jsdelivr.net",
+  "unpkg.com",
+  "ajax.googleapis.com",
+  "fonts.googleapis.com",
+  "fonts.gstatic.com",
+]);
+export const EGRESS_ONLY_EXACT_HOSTS = Object.freeze([
+  "du11hjcvx0uqb.cloudfront.net",
+  "instructure-uploads.s3.amazonaws.com",
+]);
+
+/** Same membership test as the egress proxy: exact rules, trusted IdPs, egress-only CDNs. */
+export function egressHostAllowed(host, exactRules) {
+  const h = String(host || "").toLowerCase().replace(/\.$/, "");
+  if (!h) return false;
+  return exactRules.includes(h) || isTrustedIdentityHost(h) || EGRESS_ONLY_EXACT_HOSTS.includes(h) ||
+    EGRESS_ONLY_SUFFIXES.some((s) => h === s || h.endsWith(`.${s}`));
+}
+
+/** Copy of canvasLanded in services/browser-network-policy.mjs (Canvas origin outside /login). */
+export function canvasLanded(value, canvasOrigin) {
+  try {
+    const u = new URL(value);
+    if (u.protocol !== "https:" || u.username || u.password) return false;
+    if (u.origin !== new URL(canvasOrigin).origin) return false;
+    return !/^\/login(?:\/|$)/i.test(u.pathname);
+  } catch { return false; }
+}
+
 /** Interactive top-level navigation: exact Canvas origin, exact institution rules, or a trusted IdP. */
 export function allowedInteractiveUrl(value, canvasOrigin, authHostRules) {
   try {

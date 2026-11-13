@@ -20,7 +20,8 @@ test("/live redirects to the chrome-free viewer with the same grant cookie attri
   const redeem = server.slice(server.indexOf("const redeem = "), server.indexOf("const viewer = /^\\/viewer"));
   assert.match(redeem, /location: `\/viewer\/\$\{entry\.sessionId\}\/\$\{VIEWER_PAGE\}`/);
   assert.match(server, /const VIEWER_PAGE = "viewer\.html";/);
-  assert.match(redeem, /browser_view=\$\{grant\}; HttpOnly; Secure; SameSite=Strict; Path=\/viewer\/\$\{entry\.sessionId\}; Max-Age=300/);
+  // Max-Age covers the sliding grant's 30-minute hard cap (see signin-reliability.test.mjs).
+  assert.match(redeem, /browser_view=\$\{grant\}; HttpOnly; Secure; SameSite=Strict; Path=\/viewer\/\$\{entry\.sessionId\}; Max-Age=\$\{Math\.round\(VIEWER_MAX_MS \/ 1000\)\}/);
   assert.match(redeem, /"cache-control": "no-store"/);
   assert.doesNotMatch(redeem, /vnc\.html/);
 });
@@ -83,7 +84,11 @@ test("paste sets the remote clipboard before the synthesized Control+V", () => {
   assert.match(paste, /setTimeout\(\(\) => \{[\s\S]*\}, PASTE_KEY_DELAY_MS\)/);
   assert.match(viewer, /event\.stopImmediatePropagation\(\);/);
   const shortcut = viewer.slice(viewer.indexOf('addEventListener("keydown"'), viewer.indexOf('addEventListener("keyup"'));
-  assert.doesNotMatch(shortcut, /preventDefault/, "the native paste event must still fire");
+  // Only blocked browser-UI shortcuts are cancelled; Ctrl+V is never one, so the native paste event still fires.
+  const pastePart = shortcut.slice(shortcut.indexOf("if (!isPasteShortcut(event, mac)) return;"));
+  assert.doesNotMatch(pastePart, /preventDefault/, "the native paste event must still fire");
+  assert.equal((shortcut.match(/preventDefault/g) || []).length, 1);
+  assert.match(shortcut, /if \(isBrowserUiShortcut\(event\)\) \{ event\.preventDefault\(\);/);
   assert.match(viewer, /document\.addEventListener\("paste", \(event\) => \{[\s\S]*event\.preventDefault\(\);[\s\S]*normalizePasteText/);
   assert.equal(XK.Control_L, 0xffe3);
   assert.equal(XK.v, 0x76);
@@ -139,10 +144,10 @@ test("landing blanks the viewer and suppresses every later disconnect", () => {
   assert.match(landed, /send\("signed-in-pending"\)/);
   const disconnect = viewer.slice(viewer.indexOf('rfb.addEventListener("disconnect"'), viewer.indexOf('rfb.addEventListener("credentialsrequired"'));
   assert.match(disconnect, /if \(finished \|\| landed\) return;/);
-  assert.match(viewer, /function fail\(detail\) \{\n  if \(connected \|\| finished \|\| failed \|\| landed\) return;/);
+  assert.match(viewer, /function fail\(detail\) \{\n  if \(connected \|\| everConnected \|\| finished \|\| failed \|\| landed\) return;/);
   assert.match(viewer, /new EventSource\("events"\)/);
   assert.match(viewer, /events\.addEventListener\("landed", onLanded\)/);
-  assert.match(read("services/browser-orchestrator/viewer/viewer.css"), /:root\[data-state="landed"\] \.screen \{ display: none; \}/);
+  assert.match(read("services/browser-orchestrator/viewer/viewer.css"), /:root\[data-state="landed"\] \.screen, :root\[data-state="signed-in"\] \.screen \{ display: none; \}/);
 });
 
 test("viewer event stream is grant-authenticated and emits only the event type", () => {
@@ -175,16 +180,44 @@ test("canvasLanded matches Canvas outside /login only", () => {
 });
 
 test("popup hides the viewer on landing and closes only after server confirmation", () => {
-  assert.match(popup, /message\.type === "signed-in-pending"\) \{ void confirmSignIn\(\); return; \}/);
+  assert.match(popup, /message\.type === "signed-in-pending" \|\| message\.type === "signed-in"\) \{ void confirmSignIn\(\); return; \}/);
   assert.match(popup, /if \(finishing\.current \|\| ended\.current\) return;/);
   assert.match(popup, /\/api\/canvas\/sessions\/\$\{sessionId\}\/confirm/);
   assert.match(popup, /if \(value\.confirmed\) \{ finishSignedIn\(\); return; \}/);
-  assert.match(popup, /CONFIRM_WINDOW_MS = 10_000/);
-  assert.match(popup, /type: "viewer-resume"/);
+  assert.match(popup, /FINISH_WINDOW_MS = 30_000/);
+  // The remote view is never resumed after landing (the Canvas page is never shown).
+  assert.doesNotMatch(popup, /type: "viewer-resume"/);
   assert.match(popup, /Finishing sign-in…/);
   assert.match(popup, /End session/);
   assert.match(popup, /you&apos;re signing in to/);
   assert.doesNotMatch(popup, /noVNC/i);
+});
+
+test("landed overlay can never be permanent: bounded finish window, status backup, viewer safety net", () => {
+  // Popup: every confirm request is time-boxed and the loop ends within the window.
+  assert.match(popup, /signal: AbortSignal\.timeout\(Math\.max\(1_000, Math\.min\(8_000, deadline - Date\.now\(\)\)\)\)/);
+  assert.match(popup, /while \(Date\.now\(\) < deadline && !ended\.current && finishing\.current\)/);
+  const loop = popup.slice(popup.indexOf("const confirmSignIn = useCallback"), popup.indexOf("}, [finishSignedIn, sessionId]);"));
+  const tail = loop.slice(loop.lastIndexOf("if (ended.current || !finishing.current) return;"));
+  assert.match(tail, /finishing\.current = false;/);
+  assert.match(tail, /setStage\("error"\); setErrorCode\("SIGN_IN_NOT_FINISHED"\)/);
+  assert.doesNotMatch(tail, /viewer-resume|setStage\("ready"\)/);
+  // The server-side monitor's completion is seen through the status endpoint.
+  assert.match(loop, /if \(value\.session\.state === "active"\) \{ finishSignedIn\(\); return; \}/);
+  // Duplicate signed-in-pending is a no-op while finishing.
+  assert.match(popup, /if \(!sessionId \|\| finishing\.current \|\| ended\.current\) return;/);
+  // The status poll always runs (even with the opener present).
+  assert.doesNotMatch(popup, /window\.opener && !window\.opener\.closed && !unconfirmed/);
+  // Viewer: bounded timeout leaves the overlay for an actionable, still-hidden message.
+  assert.match(viewer, /const LANDED_STUCK_MS = 40_000;/);
+  const landed = viewer.slice(viewer.indexOf("function onLanded"), viewer.indexOf("function resumeAfterLanded"));
+  assert.match(landed, /landedTimer = setTimeout/);
+  assert.match(landed, /show\("ended", "Sign-in did not finish/);
+  assert.match(landed, /send\("failed", "Sign-in confirmation timed out\."\)/);
+  assert.doesNotMatch(landed, /landed = false/, "safety net must not reveal the Canvas page");
+  const resume = viewer.slice(viewer.indexOf("function resumeAfterLanded"), viewer.indexOf('addEventListener("message", (event)'));
+  assert.match(resume, /clearTimeout\(landedTimer\)/);
+  assert.match(viewer, /beforeunload", \(\) => \{ finished = true; clearTimeout\(timeout\); clearTimeout\(landedTimer\); clearTimeout\(reconnectTimer\)/);
 });
 
 test("confirm route authenticates, rate limits, and shares the worker's finalizer", () => {

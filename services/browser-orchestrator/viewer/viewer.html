@@ -10,6 +10,12 @@
 </head>
 <body>
   <div id="screen" class="screen" aria-label="Secure browser"></div>
+  <div id="mirror" class="mirror" aria-label="Secure sign-in page" data-loading="true"></div>
+  <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
+  <button id="refresh" class="refresh" type="button" hidden>The secure browser isn't responding. Tap to refresh.</button>
+  <div id="js-dialog" class="js-dialog" role="alertdialog" aria-modal="true" aria-labelledby="js-dialog-text" hidden>
+    <div class="js-dialog-box"><p id="js-dialog-text"></p><div class="js-dialog-actions"><button type="button" id="js-dialog-cancel">Cancel</button><button type="button" id="js-dialog-ok">OK</button></div></div>
+  </div>
   <textarea id="soft-keyboard" class="soft-keyboard" aria-label="Type into the secure browser" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false" inputmode="text" enterkeyhint="enter" tabindex="-1"></textarea>
   <div id="status" class="status" role="status" aria-live="polite">
     <span class="spinner" aria-hidden="true"></span>

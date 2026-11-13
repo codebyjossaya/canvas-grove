@@ -14,7 +14,7 @@ export default defineConfig({
       dependencies: ["setup"],
       testIgnore: /global\.setup\.ts/,
       use: {
-        baseURL: process.env.CANVAS_GROVE_URL ?? "https://desktop-lnvmg14.tail8dc4e4.ts.net",
+        baseURL: process.env.CANVAS_GROVE_URL ?? "https://canvas-grove.tail8dc4e4.ts.net",
         browserName: "chromium",
         headless: true,
         launchOptions: { executablePath: "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe" },

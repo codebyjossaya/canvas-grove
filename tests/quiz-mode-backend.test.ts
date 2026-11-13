@@ -56,8 +56,10 @@ test("sanitizes question HTML and never exposes correctness metadata", () => {
 
 test("blocks prompts or options that the plain-text UI cannot reproduce faithfully", () => {
   assert.equal(questionHasUnsupportedMedia({ question_text: "<p>Text only</p>", answers: [{ html: "A" }] }), false);
-  assert.equal(questionHasUnsupportedMedia({ question_text: "<p>Interpret <img src='chart.png'></p>" }), true);
-  assert.equal(questionHasUnsupportedMedia({ question_text: "Choose", answers: [{ html: "<math><mi>x</mi></math>" }] }), true);
+  // Images and math render natively now (images stream through Grove's Canvas proxy).
+  assert.equal(questionHasUnsupportedMedia({ question_text: "<p>Interpret <img src='chart.png'></p>" }), false);
+  assert.equal(questionHasUnsupportedMedia({ question_text: "Choose", answers: [{ html: "<math><mi>x</mi></math>" }] }), false);
+  assert.equal(questionHasUnsupportedMedia({ question_text: "<video src='a.mp4'></video>" }), true);
   assert.equal(questionHasUnsupportedMedia({ quiz_question: { question_text: "<svg></svg>" } }), true);
 });
 

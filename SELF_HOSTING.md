@@ -24,19 +24,16 @@ the app is published, on `127.0.0.1` by default.
    ```
 
 4. Open `http://localhost:3000` on the host. For authenticated access from
-   another device, use a trusted HTTPS reverse proxy. This workstation's
-   canonical tailnet-only URL is
-   `https://desktop-lnvmg14.tail8dc4e4.ts.net/`; the raw LAN endpoint remains
+   another device, use a trusted HTTPS reverse proxy. The jc-homelab
+   deployment's canonical tailnet-only URL is
+   `https://canvas-grove.tail8dc4e4.ts.net/`; the raw LAN endpoint remains
    available for non-authenticated diagnostics only because Clerk's secure
    session cookies cannot be set on a raw HTTP IP address.
 
-   Tailscale Serve forwards HTTPS to the local gateway without publishing the
-   app to the internet:
-
-   ```powershell
-   tailscale serve --bg --yes http://127.0.0.1:3000
-   node scripts/set-lan-env.mjs 100.110.59.70 3000 https://desktop-lnvmg14.tail8dc4e4.ts.net
-   ```
+   On jc-homelab the host's nginx already owns :443, so the URL is served by
+   the `tailscale` sidecar in `compose.homelab.yaml` (config and state in
+   `~/apps/canvas-grove-tailscale`, auth key in `ts.env` there). Run compose
+   through `./homelab-compose.sh`.
 
 The migration job must succeed before the app starts. Future `up --build -d`
 runs pending migrations before replacing the app.

@@ -31,9 +31,11 @@ const kinds = Object.keys(syncPolicies) as SyncKind[];
  * app calls use the server-side API client (lib/canvas/session-client.ts).
  * A browser that is already gone counts as released.
  */
-export async function releaseLoginBrowser(provider: { relinquishInteractive(ref: string): Promise<unknown>; terminate(ref: string): Promise<void> }, providerSessionRef: string): Promise<boolean> {
-  await provider.relinquishInteractive(providerSessionRef).catch(() => undefined);
-  try { await provider.terminate(providerSessionRef); return true; }
+type ReleaseOptions = { reason?: "signed-in" };
+// Called only after the captured session is committed, so the viewer is told "signed-in".
+export async function releaseLoginBrowser(provider: { relinquishInteractive(ref: string, options?: ReleaseOptions): Promise<unknown>; terminate(ref: string, options?: ReleaseOptions): Promise<void> }, providerSessionRef: string): Promise<boolean> {
+  await provider.relinquishInteractive(providerSessionRef, { reason: "signed-in" }).catch(() => undefined);
+  try { await provider.terminate(providerSessionRef, { reason: "signed-in" }); return true; }
   catch (error) { return Boolean(error && typeof error === "object" && (error as { code?: unknown }).code === "BROWSER_SESSION_NOT_FOUND"); }
 }
 

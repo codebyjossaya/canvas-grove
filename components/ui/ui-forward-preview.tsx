@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { CourseWorkspace } from "./course-workspace";
 import { GradeCoursePicker } from "./grade-course-picker";
@@ -9,7 +8,9 @@ import { QuizHub } from "./quiz-hub";
 import { QuizMode } from "./quiz-mode";
 import { CanvasSessionManager } from "./canvas-session";
 import { SecureBrowserPopup } from "./secure-browser-popup";
-import courseStyles from "@/app/(workspace)/courses/courses.module.css";
+import { CoursesScreen } from "@/components/workspace/courses-screen";
+import { FIXTURE_ZONE, fixtureRows } from "@/components/preview/fixture-rows";
+import { buildCourses } from "@/lib/views/build";
 
 export function UiForwardPreview() {
   const mode = useSearchParams().get("mode") ?? "course";
@@ -24,14 +25,10 @@ export function UiForwardPreview() {
   return <CourseHubPreview />;
 }
 
+// The old course-hub mock was replaced by the redesigned CoursesScreen; render it from dev fixtures.
 function CourseHubPreview() {
-  const courses = [
-    { id: "1", code: "MAR 3023", name: "Principles of Marketing", term: "Fall 2026", grade: "B" },
-    { id: "2", code: "DIG 3878", name: "Designing Interactive Experiences", term: "Fall 2026", grade: "A−" },
-    { id: "3", code: "STA 2023", name: "Introduction to Statistics", term: "Fall 2026", grade: "Not posted" },
-    { id: "4", code: "ENC 3254", name: "Professional Communication", term: "Fall 2026", grade: "A" },
-  ];
-  return <main className="dashboard route-page"><header className={`dashboard-head ${courseStyles.heading}`}><div><p className="eyebrow">Courses</p><h1>Your learning spaces.</h1><p>Open a course, find its materials, or keep past classes close by.</p></div><div className={courseStyles.summary}><span><strong>4</strong> active</span><i /><span><strong>16</strong> synced</span></div></header><nav className={courseStyles.tabs}><Link href="#" aria-current="page">Active <span>4</span></Link><Link href="#">Inactive <span>12</span></Link></nav><section className={courseStyles.grid}>{courses.map((course, index) => <article className={courseStyles.card} key={course.id} style={{ "--course-hue": String((index * 47 + 118) % 360) } as React.CSSProperties}><div className={courseStyles.cardTop}><span className={courseStyles.courseMark}>{course.code.slice(0, 2)}</span><button className="button secondary" aria-label={`Deactivate ${course.name}`}>Active</button></div><Link className={courseStyles.cardLink} href="#"><span className={courseStyles.code}>{course.code}</span><h2>{course.name}</h2><span className={courseStyles.term}>{course.term}</span><span className={courseStyles.open}>Open course <b>→</b></span></Link><div className={courseStyles.cardFoot}><span>Current grade</span><strong>{course.grade}</strong></div></article>)}</section></main>;
+  const now = new Date();
+  return <CoursesScreen view={buildCourses(fixtureRows(now), now, FIXTURE_ZONE, "active")} />;
 }
 
 const pickerCourses = [

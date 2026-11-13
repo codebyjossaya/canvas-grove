@@ -11,11 +11,25 @@ import styles from "./secure-browser-popup.module.css";
 type PopupSession = { id: string; canvasOrigin: string; institutionName: string; state: "provisioning" | "awaiting-login" | "active" | "auth-expired" | "terminated" | "failed"; interactiveAuthExpiresAt: string | null; lastError?: string };
 type Stage = "pending" | "connecting" | "ready" | "finishing" | "connected" | "ended" | "error";
 const POLL_MS = 3000;
-// After the viewer reports the browser landed on Canvas, confirm server-side
-// for up to this long before showing the viewer again.
-const CONFIRM_WINDOW_MS = 10_000;
-const CONFIRM_RETRY_MS = 600;
+// After the viewer reports the browser landed on Canvas the remote page is
+// never shown again. The server completes sign-in on its own (durable auth
+// monitor); this window speeds it up with /confirm and watches the session
+// status, and gives up with an actionable error after FINISH_WINDOW_MS.
+export const FINISH_WINDOW_MS = 30_000;
+const FINISH_RETRY_MS = 1_000;
 const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
+type Renderer = "pixels" | "pixels-auto" | "mirror";
+
+/**
+ * Dev/test-only renderer override (?renderer=mirror|pixels on this popup's URL).
+ * It is forwarded to the one-time live link; the orchestrator honours it only
+ * when SIGNIN_RENDERER_OVERRIDE=allow, otherwise the session's configured
+ * renderer (SIGNIN_RENDERER, default pixels) is used.
+ */
+export function rendererOverrideQuery(search: string) {
+  const value = new URLSearchParams(search).get("renderer");
+  return value === "mirror" || value === "pixels" ? `?renderer=${value}` : "";
+}
 
 class PopupRequestError extends Error {
   constructor(message: string, public code: string, public blockedHost?: string) { super(message); }
@@ -56,6 +70,8 @@ export function SecureBrowserPopup({ sessionId }: { sessionId?: string }) {
   const [errorCode, setErrorCode] = useState("");
   const [blockedHost, setBlockedHost] = useState<string>();
   const [notice, setNotice] = useState("");
+  const [renderer, setRenderer] = useState<Renderer>("pixels");
+  const [mirrorSeen, setMirrorSeen] = useState(false);
   const iframe = useRef<HTMLIFrameElement | null>(null);
   const connecting = useRef(false);
   const ended = useRef(false);
@@ -84,7 +100,8 @@ export function SecureBrowserPopup({ sessionId }: { sessionId?: string }) {
       const value = await request<{ url: string }>(`/api/canvas/sessions/${sessionId}/connect`, { method: "POST", body: JSON.stringify({ width: size.width, height: size.height, dpr: size.dpr, ...(size.mobile ? { mobile: true } : {}) }), signal: AbortSignal.timeout(30_000) });
       // The fragment survives the /live redirect and lets the viewer match this page's theme.
       const theme = document.documentElement.dataset.theme === "dark" ? "dark" : "light";
-      setViewerUrl(`${value.url}#theme=${theme}`); setStage("ready"); notify("viewer-loading");
+      setRenderer("pixels"); setMirrorSeen(false);
+      setViewerUrl(`${value.url}${rendererOverrideQuery(window.location.search)}#theme=${theme}`); setStage("ready"); notify("viewer-loading");
     } catch (value) {
       const message = value instanceof Error ? value.message : "The secure browser could not connect";
       const code = value instanceof PopupRequestError ? value.code : "BROWSER_HOST_ERROR";
@@ -94,31 +111,47 @@ export function SecureBrowserPopup({ sessionId }: { sessionId?: string }) {
   }, [sessionId]);
 
   const finishSignedIn = useCallback(() => {
-    ended.current = true; setViewerUrl(""); setStage("connected"); notify("completed");
-    closeOrReturn();
+    if (ended.current) return;
+    ended.current = true; finishing.current = false;
+    iframe.current?.contentWindow?.postMessage({ source: "canvas-grove-popup", type: "viewer-complete" }, window.location.origin);
+    setViewerUrl(""); setStage("connected"); notify("completed");
+    // Leave "Signed in ✓" on screen briefly, then close.
+    window.setTimeout(closeOrReturn, 850);
   }, []);
 
-  // The viewer saw the browser land on Canvas. Hide it at once, confirm on the
-  // server, and close only once the session is confirmed active.
+  // The viewer saw the browser land on Canvas. Hide it at once (it never comes
+  // back) and finish: /confirm is the fast path, the status poll sees the
+  // server-side monitor's completion, whichever is first wins.
   const confirmSignIn = useCallback(async () => {
     if (!sessionId || finishing.current || ended.current) return;
     finishing.current = true; setStage("finishing"); setError(""); setNotice("");
-    const deadline = Date.now() + CONFIRM_WINDOW_MS;
+    const deadline = Date.now() + FINISH_WINDOW_MS;
+    let confirmAllowed = true;
     while (Date.now() < deadline && !ended.current && finishing.current) {
-      try {
-        const value = await request<{ confirmed: boolean; session: PopupSession }>(`/api/canvas/sessions/${sessionId}/confirm`, { method: "POST", body: "{}", signal: AbortSignal.timeout(8_000) });
-        setSession(value.session);
-        if (value.confirmed) { finishSignedIn(); return; }
-      } catch (value) {
-        if (value instanceof PopupRequestError && value.code === "RATE_LIMITED") break;
+      if (confirmAllowed) {
+        try {
+          const value = await request<{ confirmed: boolean; session: PopupSession }>(`/api/canvas/sessions/${sessionId}/confirm`, { method: "POST", body: "{}", signal: AbortSignal.timeout(Math.max(1_000, Math.min(8_000, deadline - Date.now()))) });
+          setSession(value.session);
+          if (value.confirmed) { finishSignedIn(); return; }
+        } catch (value) {
+          if (value instanceof PopupRequestError && value.code === "RATE_LIMITED") confirmAllowed = false;
+        }
       }
-      await sleep(CONFIRM_RETRY_MS);
+      try {
+        const value = await request<{ session: PopupSession }>(`/api/canvas/sessions/${sessionId}`, { signal: AbortSignal.timeout(5_000) });
+        setSession(value.session);
+        if (value.session.state === "active") { finishSignedIn(); return; }
+        if (["terminated", "failed", "auth-expired"].includes(value.session.state)) break;
+      } catch { /* transient: keep trying until the deadline */ }
+      if (ended.current || !finishing.current) return;
+      await sleep(FINISH_RETRY_MS);
     }
     if (ended.current || !finishing.current) return;
+    // Never resume the remote view after landing: the Canvas page is never shown.
     finishing.current = false;
-    setStage("ready");
-    setNotice("Still finishing sign-in. This window will close on its own once Canvas confirms.");
-    iframe.current?.contentWindow?.postMessage({ source: "canvas-grove-popup", type: "viewer-resume" }, window.location.origin);
+    const message = "You reached Canvas, but Canvas Grove could not finish saving the sign-in. Retry secure sign-in to try again.";
+    setViewerUrl(""); setStage("error"); setErrorCode("SIGN_IN_NOT_FINISHED"); setBlockedHost(undefined); setError(message);
+    notify("failed", message, "SIGN_IN_NOT_FINISHED");
   }, [finishSignedIn, sessionId]);
 
   useEffect(() => {
@@ -139,7 +172,14 @@ export function SecureBrowserPopup({ sessionId }: { sessionId?: string }) {
       if (event.origin !== window.location.origin || event.source !== iframe.current?.contentWindow) return;
       const message = event.data as { source?: string; type?: string; detail?: string };
       if (message.source !== "canvas-grove-viewer") return;
-      if (message.type === "signed-in-pending") { void confirmSignIn(); return; }
+      // "signed-in" means the server already saved the session and released the browser.
+      if (message.type === "signed-in-pending" || message.type === "signed-in") { void confirmSignIn(); return; }
+      // The viewer reports which renderer is showing the page (DOM mirror or classic pixels).
+      if (message.type === "renderer") {
+        if (message.detail === "mirror" || message.detail === "pixels" || message.detail === "pixels-auto") setRenderer(message.detail);
+        if (message.detail === "mirror") setMirrorSeen(true);
+        return;
+      }
       // Once landing is reported the live viewer is torn down on purpose:
       // disconnect and expiry signals are expected and never shown.
       if (finishing.current || ended.current) return;
@@ -167,20 +207,15 @@ export function SecureBrowserPopup({ sessionId }: { sessionId?: string }) {
   useEffect(() => {
     if (!sessionId) return;
     let timer: number | undefined;
+    // Always watch the session: the server can finish sign-in on its own (even
+    // when the landed signal never reached this window) and this window must
+    // then close instead of sitting on a stale view.
     const poll = async () => {
-      if (window.opener && !window.opener.closed) {
-        timer = window.setTimeout(poll, POLL_MS);
-        return;
-      }
+      if (finishing.current) { timer = window.setTimeout(poll, POLL_MS); return; }
       try {
         const value = await request<{ session: PopupSession }>(`/api/canvas/sessions/${sessionId}`);
         setSession(value.session);
-        if (value.session.state === "active") {
-          ended.current = true; setViewerUrl(""); setStage("connected"); notify("completed");
-          window.setTimeout(() => window.close(), 850);
-          window.setTimeout(() => { if (!window.closed) window.location.replace("/"); }, 1250);
-          return;
-        }
+        if (value.session.state === "active") { finishSignedIn(); return; }
         if (["terminated", "failed", "auth-expired"].includes(value.session.state)) {
           ended.current = true; setViewerUrl(""); setStage("ended"); notify("ended", value.session.state); return;
         }
@@ -189,7 +224,7 @@ export function SecureBrowserPopup({ sessionId }: { sessionId?: string }) {
     };
     timer = window.setTimeout(poll, POLL_MS);
     return () => { if (timer) window.clearTimeout(timer); };
-  }, [sessionId]);
+  }, [finishSignedIn, sessionId]);
   const host = signInHost(session);
   const navigationBlocked = errorCode === "BROWSER_NAVIGATION_BLOCKED";
   const interactiveTimedOut = errorCode === "INTERACTIVE_AUTH_TIMEOUT";
@@ -201,11 +236,15 @@ export function SecureBrowserPopup({ sessionId }: { sessionId?: string }) {
     notify("ended", "Secure sign-in time expired", "INTERACTIVE_AUTH_TIMEOUT");
   };
   const viewerVisible = Boolean(viewerUrl) && stage !== "finishing";
+  // Only offered when the session runs the DOM mirror: lets the user force the classic (pixel) view and back.
+  const toggleRenderer = () => iframe.current?.contentWindow?.postMessage({ source: "canvas-grove-popup", type: "renderer-toggle" }, window.location.origin);
+  const rendererToggle = viewerVisible && (renderer === "mirror" || renderer === "pixels-auto" || renderer === "pixels" && mirrorSeen);
   return <main className={styles.shell}>
     <header className={styles.toolbar}>
       <div className={styles.identity}><LockIcon/><p><strong>Secure browser</strong>{host ? <span> — you&apos;re signing in to {host}</span> : null}</p></div>
       <div className={styles.actions}>
         {session && shouldShowInteractiveAuthDeadline(session) && !interactiveTimedOut && <div className={styles.deadline}><InteractiveAuthCountdown expiresAt={session.interactiveAuthExpiresAt!} surface="header" onExpire={expireInteractiveAttempt}/></div>}
+        {rendererToggle && <button type="button" className={styles.close} onClick={toggleRenderer}>{renderer === "mirror" ? "Switch to classic view" : "Switch to page view"}</button>}
         <ThemeControl compact/>
         <button type="button" className={styles.close} onClick={closeOrReturn}>End session</button>
       </div>
@@ -213,7 +252,7 @@ export function SecureBrowserPopup({ sessionId }: { sessionId?: string }) {
     <section className={styles.stage} aria-live="polite">
       {viewerUrl && <iframe ref={iframe} src={viewerUrl} title="Secure Canvas live browser" allow="fullscreen" className={viewerVisible ? undefined : styles.hidden} aria-hidden={viewerVisible ? undefined : true}/>}
       {stage === "finishing" && <div className={styles.placeholder}><span className={styles.line}/><h1>Finishing sign-in…</h1></div>}
-      {!viewerUrl && <div className={styles.placeholder} role={stage === "error" || interactiveTimedOut ? "alert" : undefined}>{(stage === "connecting" || stage === "pending") && <span className={styles.line}/>}<h1>{stage === "pending" || stage === "connecting" ? "Preparing secure browser" : stage === "connected" ? "Canvas connected" : interactiveTimedOut ? "Secure sign-in time expired" : stage === "ended" ? "This sign-in session has ended" : navigationBlocked ? "Institution sign-in redirect blocked" : stage === "error" ? "Secure browser needs attention" : "Opening institution sign-in"}</h1>{navigationBlocked ? <div className={styles.blockedCopy}>{blockedHost&&<p className={styles.blockedHost}><span>Blocked hostname</span><code>{blockedHost}</code></p>}<p>Canvas Grove stopped this destination before showing it to you. Confirm the hostname belongs to your institution. If it does, retry or reconnect with that exact sign-in domain; otherwise cancel the session.</p></div> : <p className={stage === "error" || interactiveTimedOut ? styles.error : undefined}>{error || (stage === "pending" || stage === "connecting" ? "Canvas Grove is reserving your isolated browser. This window will continue automatically." : stage === "connected" ? "Authentication was detected automatically. This window will close." : interactiveTimedOut ? "This browser is closed. Return to Canvas Grove to start a new secure sign-in; reopening cannot reset the timer." : stage === "ended" ? "Return to Canvas Grove to reconnect or revoke this session." : "Only enter credentials after your institution sign-in page appears.")}</p>}{interactiveTimedOut ? <button type="button" className={styles.retry} onClick={() => { window.opener?.focus(); closeOrReturn(); }}>Return to Canvas Grove</button> : stage === "error" && <div className={styles.errorActions}><button type="button" className={styles.retry} onClick={() => void connect()}>Retry secure sign-in</button><button type="button" className={styles.cancel} onClick={closeOrReturn}>Close and return</button></div>}</div>}
+      {!viewerUrl && <div className={styles.placeholder} role={stage === "error" || interactiveTimedOut ? "alert" : undefined}>{(stage === "connecting" || stage === "pending") && <span className={styles.line}/>}<h1>{stage === "pending" || stage === "connecting" ? "Preparing secure browser" : stage === "connected" ? "Signed in ✓" : interactiveTimedOut ? "Secure sign-in time expired" : stage === "ended" ? "This sign-in session has ended" : navigationBlocked ? "Institution sign-in redirect blocked" : stage === "error" ? "Secure browser needs attention" : "Opening institution sign-in"}</h1>{navigationBlocked ? <div className={styles.blockedCopy}>{blockedHost&&<p className={styles.blockedHost}><span>Blocked hostname</span><code>{blockedHost}</code></p>}<p>Canvas Grove stopped this destination before showing it to you. Confirm the hostname belongs to your institution. If it does, retry or reconnect with that exact sign-in domain; otherwise cancel the session.</p></div> : <p className={stage === "error" || interactiveTimedOut ? styles.error : undefined}>{error || (stage === "pending" || stage === "connecting" ? "Canvas Grove is reserving your isolated browser. This window will continue automatically." : stage === "connected" ? "Canvas is connected. This window will close." : interactiveTimedOut ? "This browser is closed. Return to Canvas Grove to start a new secure sign-in; reopening cannot reset the timer." : stage === "ended" ? "Return to Canvas Grove to reconnect or revoke this session." : "Only enter credentials after your institution sign-in page appears.")}</p>}{interactiveTimedOut ? <button type="button" className={styles.retry} onClick={() => { window.opener?.focus(); closeOrReturn(); }}>Return to Canvas Grove</button> : stage === "error" && <div className={styles.errorActions}><button type="button" className={styles.retry} onClick={() => void connect()}>Retry secure sign-in</button><button type="button" className={styles.cancel} onClick={closeOrReturn}>Close and return</button></div>}</div>}
       {notice && viewerVisible && <div className={styles.status} role="status">{notice}</div>}
     </section>
   </main>;

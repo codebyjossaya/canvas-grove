@@ -52,9 +52,10 @@ export interface HostedBrowserProvider {
   interactiveConnect(providerSessionId: string): Promise<{ url: string; expiresAt: number }>;
   status(providerSessionId: string): Promise<{ state: Exclude<HostedSessionState, "terminated">; canvasAccountId?: string; authRequired?: boolean }>;
   navigate(providerSessionId: string, destination: "canvas-home" | "canvas-login"): Promise<void>;
-  relinquishInteractive(providerSessionId: string): Promise<{ providerSessionId: string }>;
+  /** options.reason "signed-in": the session was just committed (the viewer shows success). */
+  relinquishInteractive(providerSessionId: string, options?: { reason?: "signed-in" }): Promise<{ providerSessionId: string }>;
   snapshotEncrypted(providerSessionId: string, ownerId: string): Promise<EncryptedBrowserState>;
-  terminate(providerSessionId: string): Promise<void>;
+  terminate(providerSessionId: string, options?: { reason?: "signed-in" }): Promise<void>;
 }
 
 export interface HostedSessionStore {

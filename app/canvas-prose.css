@@ -1,0 +1,44 @@
+/* Canvas-authored HTML (assignment descriptions, pages, syllabus) rendered inside Grove.
+   Uses only theme tokens: Canvas inline styles, <font>, color/size attributes and class names are
+   stripped by lib/views/canvas-html.ts, so light/dark themes apply unchanged. */
+.canvas-prose{white-space:normal;color:var(--text-primary);font-family:var(--font-sans);font-size:var(--fs-base);line-height:1.65;overflow-wrap:anywhere;min-width:0;max-width:72ch}
+.canvas-prose > :first-child{margin-top:0}
+.canvas-prose > :last-child{margin-bottom:0}
+.canvas-prose p{margin:0 0 .85em}
+.canvas-prose h1,.canvas-prose h2,.canvas-prose h3,.canvas-prose h4,.canvas-prose h5,.canvas-prose h6{color:var(--text-primary);font-weight:600;line-height:1.3;margin:1.4em 0 .5em}
+.canvas-prose h1{font-size:var(--fs-xl,1.4rem)}
+.canvas-prose h2{font-size:var(--fs-lg,1.2rem)}
+.canvas-prose h3{font-size:var(--fs-md,1.08rem)}
+.canvas-prose h4,.canvas-prose h5,.canvas-prose h6{font-size:var(--fs-base);color:var(--text-secondary)}
+.canvas-prose strong,.canvas-prose b{font-weight:600;color:var(--text-primary)}
+.canvas-prose small{color:var(--text-muted)}
+.canvas-prose ul,.canvas-prose ol{margin:0 0 .85em;padding-left:1.4em}
+.canvas-prose li{margin:.25em 0}
+.canvas-prose li::marker{color:var(--text-muted)}
+.canvas-prose li > ul,.canvas-prose li > ol{margin:.25em 0 0}
+.canvas-prose hr{border:0;border-top:1px solid var(--border-subtle);margin:1.4em 0}
+.canvas-prose blockquote{margin:1em 0;padding:.25em 0 .25em 1em;border-left:3px solid var(--border-strong);color:var(--text-secondary)}
+.canvas-prose code{font-family:var(--font-mono);font-size:.9em;background:var(--surface-sunken);border:1px solid var(--border-subtle);border-radius:4px;padding:.05em .35em}
+.canvas-prose pre{font-family:var(--font-mono);font-size:var(--fs-sm);max-width:100%;overflow-x:auto;background:var(--surface-sunken);border:1px solid var(--border-subtle);border-radius:var(--radius-sm);padding:10px 12px}
+.canvas-prose pre code{background:none;border:0;padding:0}
+.canvas-prose table{display:block;max-width:100%;overflow-x:auto;border-collapse:collapse;margin:0 0 1em;font-size:var(--fs-sm)}
+.canvas-prose th,.canvas-prose td{border:1px solid var(--border-subtle);padding:6px 10px;text-align:left;vertical-align:top}
+.canvas-prose th,.canvas-prose thead td{background:var(--surface-subtle);color:var(--text-secondary);font-weight:600}
+.canvas-prose caption{color:var(--text-muted);font-size:var(--fs-xs);padding:4px 0;text-align:left}
+.canvas-prose img,.canvas-prose video{max-width:100%;height:auto;border-radius:var(--radius-sm)}
+.canvas-prose img[data-equation]{display:inline-block;vertical-align:middle;border-radius:0;max-height:3em}
+:root[data-theme="dark"] .canvas-prose img[data-equation]{filter:invert(1) hue-rotate(180deg)}
+.canvas-prose a{color:var(--accent-text);text-decoration:underline;text-decoration-color:color-mix(in srgb,var(--accent-text) 40%,transparent);text-underline-offset:2px}
+.canvas-prose a:hover{text-decoration-color:currentColor}
+.canvas-prose a:focus-visible{outline:2px solid var(--focus-ring);outline-offset:2px;border-radius:2px}
+/* Link kinds (set by the renderer): files stream through Grove; canvas/external open in a new tab. */
+.canvas-prose a[data-link="file"]{display:inline-flex;align-items:center;gap:6px;padding:2px 8px;border:1px solid var(--border-subtle);border-radius:var(--radius-sm);background:var(--surface-subtle);text-decoration:none;color:var(--text-primary)}
+.canvas-prose a[data-link="file"]::before{content:"";width:14px;height:14px;flex:none;background:currentColor;opacity:.6;-webkit-mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2'%3E%3Cpath d='M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z'/%3E%3Cpath d='M14 3v6h6'/%3E%3C/svg%3E") center/contain no-repeat;mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2'%3E%3Cpath d='M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z'/%3E%3Cpath d='M14 3v6h6'/%3E%3C/svg%3E") center/contain no-repeat}
+.canvas-prose a[data-link="file"]:hover{background:var(--surface-hover);border-color:var(--border-strong)}
+.canvas-prose a[data-link="external"]::after,.canvas-prose a[data-link="canvas"]::after{content:"↗";font-size:.8em;margin-left:2px;color:var(--text-muted);text-decoration:none;display:inline-block}
+.canvas-prose a[data-link="canvas"]{color:var(--text-secondary)}
+.canvas-prose a[data-embed]{display:inline-flex;align-items:center;gap:6px;padding:8px 12px;border:1px dashed var(--border-strong);border-radius:var(--radius-md);background:var(--surface-subtle);text-decoration:none;color:var(--text-primary)}
+.canvas-prose a[data-embed]::before{content:"▶";font-size:.8em;color:var(--text-muted)}
+@media (max-width:767px){.canvas-prose{max-width:none}}
+.canvas-prose-inline{display:inline;max-width:none}
+.canvas-prose-inline > p{display:inline;margin:0}

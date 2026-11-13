@@ -22,7 +22,7 @@ test("opener and popup validate same-origin message sources", () => {
 test("ending a session removes the viewer and automatic completion closes it", () => {
   assert.match(popup, /setViewerUrl\(""\)/);
   assert.match(popup, /notify\("completed"\)/);
-  assert.match(popup, /window\.setTimeout\(\(\) => window\.close\(\)/);
+  assert.match(popup, /window\.setTimeout\(closeOrReturn, 850\)/);
   assert.match(opener, /closePopup\(\)/);
   assert.doesNotMatch(popup, /beforeunload/, "normal placeholder-to-session navigation must not be reported as a closed window");
 });

@@ -1,0 +1,51 @@
+.page{animation:cg-fade var(--motion-base) var(--ease-standard)}
+.grid{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:var(--space-8);align-items:start}
+.agenda{display:grid;gap:var(--space-6);min-width:0}
+.group{display:grid;gap:2px}
+.groupHead{display:flex;align-items:baseline;gap:8px;margin:0 0 4px;padding:0 12px;font-size:var(--fs-sm);font-weight:600;color:var(--text-primary)}
+.groupHead small{color:var(--text-muted);font-size:var(--fs-xs);font-weight:500}
+.groupHead :global(.count){align-self:center}
+.overdue .groupHead > span:first-child{color:var(--status-danger)}
+.overdue{padding:8px 0 6px;border-radius:var(--radius-lg);background:color-mix(in srgb,var(--status-danger-soft) 55%,transparent);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--status-danger-border) 55%,transparent)}
+.overdue .groupHead{padding-top:4px}
+.quiet{padding:10px 12px;color:var(--text-muted);font-size:var(--fs-sm)}
+.later{display:inline-flex;align-items:center;gap:6px;justify-self:start;margin-left:12px;color:var(--text-muted);font-size:var(--fs-sm);font-weight:500}
+.later svg{width:14px;height:14px}
+.later:hover{color:var(--text-primary)}
+.banner{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:var(--space-4);margin-bottom:var(--space-6);padding:var(--space-4) var(--space-5);border-radius:var(--radius-lg);background:var(--accent-soft);color:var(--text-primary)}
+.banner > svg{color:var(--accent-text)}
+.banner p{margin-top:2px;color:var(--text-secondary);font-size:var(--fs-sm)}
+.side{position:sticky;top:var(--space-6);display:grid;gap:var(--space-4)}
+.cardHead{display:flex;align-items:baseline;justify-content:space-between;gap:var(--space-3);padding:14px 16px 8px}
+.cardHead h2{font-size:var(--fs-sm);font-weight:600}
+.cardHead span,.cardHead a{color:var(--text-muted);font-size:var(--fs-xs);white-space:nowrap}
+.cardHead a:hover{color:var(--text-primary)}
+.digest{padding-bottom:6px}
+.digestList{list-style:none;margin:0;padding:0 6px;display:grid}
+.digestList li{display:grid;grid-template-columns:28px minmax(0,1fr) auto;align-items:start;gap:10px;padding:8px 10px;border-radius:var(--radius-md);position:relative}
+.digestList li:hover{background:var(--surface-hover)}
+.digestIcon{display:grid;place-items:center;width:28px;height:28px;border-radius:var(--radius-md);background:var(--surface-subtle);color:var(--text-muted)}
+.digestIcon svg{width:15px;height:15px}
+.digestIcon.grade{background:var(--status-success-soft);color:var(--status-success)}
+.digestIcon.message{background:var(--accent-soft);color:var(--accent-text)}
+.digestMain{display:grid;gap:2px;min-width:0}
+.digestMain::after{content:"";position:absolute;inset:0;border-radius:inherit}
+.digestMain:focus-visible{outline:none}
+.digestMain:focus-visible::after{outline:2px solid var(--focus-ring);outline-offset:-2px}
+.digestMain strong{font-size:var(--fs-sm);font-weight:500;line-height:1.35;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.digestMain small{display:flex;align-items:center;gap:8px;color:var(--text-muted);font-size:var(--fs-xs);min-width:0}
+.digestMain small :global(.course-code){flex:none}
+.digestMain small span:last-child{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.digestAside{display:grid;justify-items:end;gap:2px;color:var(--text-muted);font-size:var(--fs-xs);white-space:nowrap}
+.digestAside b{color:var(--text-primary);font-size:var(--fs-sm);font-weight:600}
+.courses ul{list-style:none;margin:0;padding:0 6px 6px;display:grid}
+.courses a{display:grid;grid-template-columns:10px minmax(0,1fr) auto 44px;align-items:center;gap:10px;min-height:44px;padding:4px 10px;border-radius:var(--radius-md)}
+.courses a:hover{background:var(--surface-hover)}
+.courseName{display:grid;min-width:0}
+.courseName strong{font-size:var(--fs-sm);font-weight:600;font-variant-numeric:tabular-nums}
+.courseName small{color:var(--text-muted);font-size:var(--fs-xs);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.courseDue{color:var(--text-muted);font-size:var(--fs-xs);white-space:nowrap}
+.courseGrade{text-align:right;font-weight:600;font-size:var(--fs-sm);font-variant-numeric:tabular-nums}
+@media (max-width:1100px){.grid{grid-template-columns:minmax(0,1fr) 300px;gap:var(--space-6)}}
+@media (max-width:900px){.grid{grid-template-columns:1fr}.side{position:static}}
+@media (max-width:767px){.groupHead{padding:0 8px}.banner{grid-template-columns:auto 1fr}.banner :global(.button){grid-column:1/-1}.later{margin-left:8px}}

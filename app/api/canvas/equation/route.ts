@@ -10,6 +10,6 @@ export async function GET(request: Request) {
   if (!session.userId) return Response.json({ error: "Authentication required", code: "AUTH_REQUIRED" }, { status: 401 });
   try {
     const path = new URL(request.url).searchParams.get("p") ?? "";
-    return await proxyEquationImage(await ensureUserForClerk(session.userId), path);
+    return await proxyEquationImage(await ensureUserForClerk(session.userId), path, request.headers.get("if-none-match"));
   } catch (error) { return proxyErrorResponse(error); }
 }

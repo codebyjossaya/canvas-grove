@@ -2,18 +2,20 @@ import "server-only";
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { connection } from "next/server";
-import { eq, sql } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 import { ensureUserForClerk } from "@/lib/db/auth-context";
 import { withTenantTransaction } from "@/lib/db";
 import { userPreferences } from "@/lib/db/schema";
+import { loadProfile } from "@/lib/views/loaders";
 
 export const ORIENTATION_VERSION = "2026-11-v1";
 
 export async function onboardingForClerk(clerkUserId: string) {
   const ctx = await ensureUserForClerk(clerkUserId);
-  const [row] = await withTenantTransaction(ctx.ownerId, (tx) => tx.select({ version: userPreferences.orientationVersion, completedAt: userPreferences.orientationCompletedAt }).from(userPreferences).where(eq(userPreferences.ownerId, ctx.ownerId)).limit(1));
-  const completed = row?.version === ORIENTATION_VERSION && Boolean(row.completedAt);
-  return { ctx, completed, orientationVersion: ORIENTATION_VERSION, completedAt: completed ? row.completedAt : null };
+  // Shares the request-scoped profile read with the page loaders (no extra query when they run).
+  const { pref: row } = await loadProfile(ctx.ownerId);
+  const completed = row?.orientationVersion === ORIENTATION_VERSION && Boolean(row.orientationCompletedAt);
+  return { ctx, completed, orientationVersion: ORIENTATION_VERSION, completedAt: completed ? row!.orientationCompletedAt : null };
 }
 
 export async function completeOnboardingForClerk(clerkUserId: string) {

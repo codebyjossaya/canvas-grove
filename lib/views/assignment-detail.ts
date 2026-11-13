@@ -28,16 +28,18 @@ export async function loadAssignmentDetail(ctx: AuthContext, courseId: string, a
   if (!isUuid(courseId) || !isUuid(assignmentId)) return null;
   return withTenantTransaction(ctx.ownerId, async (tx) => {
     const owner = ctx.ownerId;
-    const [row] = await tx.select({ id: assignments.id, name: assignments.name, dueAt: assignments.dueAt, unlockAt: assignments.unlockAt, lockAt: assignments.lockAt, points: assignments.pointsPossible, submissionTypes: assignments.submissionTypes, descriptionHtml: assignments.descriptionHtml, payload: assignments.sourcePayload, canvasAssignmentId: assignments.canvasAssignmentId })
-      .from(assignments).where(and(eq(assignments.ownerId, owner), eq(assignments.id, assignmentId), eq(assignments.courseId, courseId), isNull(assignments.deletedAt))).limit(1);
-    if (!row) return null;
-    const [course] = await tx.select({ id: courses.id, name: courses.name, courseCode: courses.courseCode, canvasCourseId: courses.canvasCourseId, canvasAccountId: courses.canvasAccountId }).from(courses).where(and(eq(courses.ownerId, owner), eq(courses.id, courseId), isNull(courses.deletedAt))).limit(1);
-    if (!course) return null;
-    const [account] = await tx.select({ origin: canvasAccounts.canvasBaseUrl }).from(canvasAccounts).where(and(eq(canvasAccounts.ownerId, owner), eq(canvasAccounts.id, course.canvasAccountId))).limit(1);
-    const [sub] = await tx.select({ state: submissions.state, late: submissions.late, missing: submissions.missing, excused: submissions.excused, submittedAt: submissions.submittedAt, score: submissions.score, grade: submissions.grade, syncedAt: submissions.syncedAt })
-      .from(submissions).where(and(eq(submissions.ownerId, owner), eq(submissions.assignmentId, assignmentId))).orderBy(desc(submissions.attempt)).limit(1);
-    const [quiz] = await tx.select({ id: quizzes.id, supported: quizzes.supported }).from(quizzes)
-      .where(and(eq(quizzes.ownerId, owner), eq(quizzes.courseId, courseId), eq(quizzes.canvasAssignmentId, row.canvasAssignmentId), isNull(quizzes.deletedAt))).limit(1);
+    // Row, course (+ its Canvas account) and latest submission are independent: one pipelined batch.
+    const [[row], [courseJoin], [sub]] = await Promise.all([
+      tx.select({ id: assignments.id, name: assignments.name, dueAt: assignments.dueAt, unlockAt: assignments.unlockAt, lockAt: assignments.lockAt, points: assignments.pointsPossible, submissionTypes: assignments.submissionTypes, descriptionHtml: assignments.descriptionHtml, payload: assignments.sourcePayload, canvasAssignmentId: assignments.canvasAssignmentId })
+      .from(assignments).where(and(eq(assignments.ownerId, owner), eq(assignments.id, assignmentId), eq(assignments.courseId, courseId), isNull(assignments.deletedAt))).limit(1),
+      tx.select({ id: courses.id, name: courses.name, courseCode: courses.courseCode, canvasCourseId: courses.canvasCourseId, origin: canvasAccounts.canvasBaseUrl }).from(courses)
+        .leftJoin(canvasAccounts, and(eq(canvasAccounts.ownerId, owner), eq(canvasAccounts.id, courses.canvasAccountId)))
+        .where(and(eq(courses.ownerId, owner), eq(courses.id, courseId), isNull(courses.deletedAt))).limit(1),
+      tx.select({ state: submissions.state, late: submissions.late, missing: submissions.missing, excused: submissions.excused, submittedAt: submissions.submittedAt, score: submissions.score, grade: submissions.grade, syncedAt: submissions.syncedAt })
+        .from(submissions).where(and(eq(submissions.ownerId, owner), eq(submissions.assignmentId, assignmentId))).orderBy(desc(submissions.attempt)).limit(1),
+    ]);
+    if (!row || !courseJoin) return null;
+    const course = courseJoin, account = { origin: courseJoin.origin };
     const payload = (row.payload && typeof row.payload === "object" ? row.payload : {}) as Record<string, unknown>;
     const payloadUrl = safeHttpsUrl(payload.html_url);
     let origin: string | null = null;
@@ -47,7 +49,11 @@ export async function loadAssignmentDetail(ctx: AuthContext, courseId: string, a
     const rawTypes: unknown = row.submissionTypes;
     const types = Array.isArray(rawTypes) ? rawTypes.filter((t): t is string => typeof t === "string") : typeof rawTypes === "string" && rawTypes ? [rawTypes] : [];
     const rawHtml = row.descriptionHtml ?? (typeof payload.description === "string" ? payload.description : null);
-    const resolve = await buildCanvasLinkResolver(tx, owner, origin, [rawHtml]);
+    const [resolve, [quiz]] = await Promise.all([
+      buildCanvasLinkResolver(tx, owner, origin, [rawHtml]),
+      tx.select({ id: quizzes.id, supported: quizzes.supported }).from(quizzes)
+        .where(and(eq(quizzes.ownerId, owner), eq(quizzes.courseId, courseId), eq(quizzes.canvasAssignmentId, row.canvasAssignmentId), isNull(quizzes.deletedAt))).limit(1),
+    ]);
     const summary = sub ? { ...sub, submittedAt: iso(sub.submittedAt), score: num(sub.score) } : null;
     return {
       id: row.id, courseId: course.id, courseName: course.name, courseCode: course.courseCode ?? null, title: row.name,

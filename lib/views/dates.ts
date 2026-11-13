@@ -1,4 +1,4 @@
-import { formatInstant, localDateKey } from "@/lib/time";
+import { dateFormatter, formatInstant, localDateKey } from "@/lib/time";
 import type { Instant } from "./types";
 
 // Calendar math on "YYYY-MM-DD" keys in the student's display time zone. Keys are converted to
@@ -39,7 +39,7 @@ export function weekStartKey(key: string, weekStartsOn = 0) {
 }
 
 export function formatKey(key: string, options: Intl.DateTimeFormatOptions) {
-  return new Intl.DateTimeFormat("en-US", { ...options, timeZone: "UTC" }).format(keyDate(key));
+  return dateFormatter("en-US", { ...options, timeZone: "UTC" }).format(keyDate(key));
 }
 
 export function dayLabel(key: string, todayKey: string) {

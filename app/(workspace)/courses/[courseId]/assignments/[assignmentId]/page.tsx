@@ -2,7 +2,7 @@ import { auth } from "@clerk/nextjs/server";
 import { notFound, redirect } from "next/navigation";
 import { Suspense } from "react";
 import { PageSkeleton } from "@/components/ui/app-shell";
-import { OnboardingGate } from "@/components/ui/onboarding-gate";
+import { requireCompletedOnboarding } from "@/lib/onboarding";
 import { AssignmentDetailView } from "@/components/workspace/assignment-detail-view";
 import { ensureUserForClerk } from "@/lib/db/auth-context";
 import { loadAssignmentDetail } from "@/lib/views/assignment-detail";
@@ -19,7 +19,7 @@ async function Page({ params }: { params: Params }) {
   const session = await auth();
   if (!session.userId) redirect("/sign-in");
   const ctx = await ensureUserForClerk(session.userId);
-  const detail = await loadAssignmentDetail(ctx, courseId, assignmentId);
+  const [, detail] = await Promise.all([requireCompletedOnboarding(), loadAssignmentDetail(ctx, courseId, assignmentId)]);
   if (!detail) notFound();
-  return <OnboardingGate><AssignmentDetailView detail={detail} /></OnboardingGate>;
+  return <AssignmentDetailView detail={detail} />;
 }

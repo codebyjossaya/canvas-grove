@@ -1,3 +1,4 @@
+import { dateFormatter } from "@/lib/time";
 import { addDays, dayKey, daySublabel, dayLabel, diffDays, formatKey, iso, ms, weekRangeLabel, weekStartKey } from "./dates";
 import { assignmentHref } from "./assignment-detail-core";
 import { htmlToParagraphs, initials, plainText, safeHttpsUrl } from "./text";
@@ -251,10 +252,10 @@ function buildDigest(rows: WorkspaceRows, now: Date, zone: string, input: Digest
 
 function sinceLabelFor(sinceIso: string, now: Date, zone: string) {
   const delta = diffDays(dayKey(now, zone), dayKey(sinceIso, zone));
-  const time = new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit", timeZone: zone }).format(new Date(sinceIso));
+  const time = dateFormatter("en-US", { hour: "numeric", minute: "2-digit", timeZone: zone }).format(new Date(sinceIso));
   if (delta === 0) return `${time} today`;
   if (delta === 1) return `yesterday, ${time}`;
-  return new Intl.DateTimeFormat("en-US", { weekday: "short", month: "short", day: "numeric", timeZone: zone }).format(new Date(sinceIso));
+  return dateFormatter("en-US", { weekday: "short", month: "short", day: "numeric", timeZone: zone }).format(new Date(sinceIso));
 }
 
 export function participantNames(value: unknown, limit = 3) {

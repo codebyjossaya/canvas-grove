@@ -11,6 +11,6 @@ export async function GET(request: Request, context: { params: Promise<{ fileId:
   try {
     const { fileId } = await context.params;
     const inline = new URL(request.url).searchParams.get("inline") === "1";
-    return await proxyCanvasFile(await ensureUserForClerk(session.userId), fileId, inline);
+    return await proxyCanvasFile(await ensureUserForClerk(session.userId), fileId, inline, request.headers.get("if-none-match"));
   } catch (error) { return proxyErrorResponse(error); }
 }

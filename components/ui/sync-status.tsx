@@ -57,20 +57,39 @@ function compactLabel(status: Status) {
   return status.nextScheduledSync ? `Next sync ${relativeFuture(status.nextScheduledSync)}` : "Sync idle";
 }
 
+/** One status fetch shared by every mounted controller (sidebar, top bar, settings panel). */
+const shared: { promise: Promise<Response> | null; at: number; value: SyncResponse | null; ok: boolean; status: number } = { promise: null, at: 0, value: null, ok: false, status: 0 };
+const FRESH_WINDOW_MS = 8_000;
+async function sharedStatus(force: boolean): Promise<{ ok: boolean; status: number; value: SyncResponse & { error?: string } }> {
+  if (!force && !shared.promise && shared.value && shared.ok && Date.now() - shared.at < FRESH_WINDOW_MS) return { ok: true, status: shared.status, value: shared.value };
+  // Never overlap requests: concurrent callers share the one in-flight fetch.
+  if (!shared.promise) {
+    shared.promise = fetch("/api/canvas/sync/status", { cache: "no-cache" }).then(async response => {
+      const value = await response.json() as SyncResponse;
+      shared.value = value; shared.ok = response.ok; shared.status = response.status; shared.at = Date.now();
+      return response;
+    }).finally(() => { shared.promise = null; });
+  }
+  const response = await shared.promise;
+  return { ok: response.ok, status: response.status, value: shared.value as SyncResponse & { error?: string } };
+}
+
+const POLL_MS = [60_000, 120_000, 300_000], RUNNING_POLL_MS = 10_000;
+
 function useSyncController() {
   const router = useRouter();
   const [status, setStatus] = useState<Status | null>(null), [checking, setChecking] = useState(false), [syncing, setSyncing] = useState(false), [error, setError] = useState("");
-  const inflight = useRef<Promise<SyncResponse | null> | null>(null);
-  const load = useCallback((): Promise<SyncResponse | null> => {
-    // Never overlap requests: concurrent callers share the one in-flight fetch.
-    if (!inflight.current) inflight.current = fetchStatus().finally(() => { inflight.current = null; });
-    return inflight.current;
-    async function fetchStatus(): Promise<SyncResponse | null> {
+  const signature = useRef("");
+  const [changed, setChanged] = useState(0);
+  const load = useCallback(async (force = false): Promise<SyncResponse | null> => {
     try {
-      const response = await fetch("/api/canvas/sync/status", { cache: "no-store" }), value = await response.json() as SyncResponse & { error?: string };
+      const { ok, status: httpStatus, value } = await sharedStatus(force);
+      const response = { ok, status: httpStatus };
       if (!response.ok) { setError(response.status === 401 ? "Your Canvas Grove session expired. Sign in again to check sync status." : response.status === 404 ? "Sync has not been initialized yet. Your saved data is unchanged." : "Sync status is temporarily unavailable. Your saved data remains safe."); return null; }
       const scheduled = value.jobs.filter(j => j.status === "queued").sort((a, b) => a.runAfter.localeCompare(b.runAfter))[0];
       const successes = value.resources.map(r => r.lastSuccessAt).filter((v): v is string => Boolean(v)).sort().reverse();
+      const next = JSON.stringify([value.resources, value.jobs.map(j => [j.status, j.errorCode, j.runAfter])]);
+      if (next !== signature.current) { signature.current = next; setChanged(count => count + 1); }
       setStatus({ state: deriveSyncState(value), lastSuccessfulSync: successes[0], nextScheduledSync: scheduled?.runAfter, resources: value.resources.map(r => ({ name: resourceName(r.kind), lastSuccessfulSync: r.lastSuccessAt ?? undefined, freshness: r.freshness, errorCode: r.errorCode })) });
       setError("");
       return value;
@@ -78,10 +97,31 @@ function useSyncController() {
       setError(!navigator.onLine ? "This device is offline. Previously synced data remains available." : "Canvas Grove could not check sync status. Your saved data remains safe.");
       return null;
     }
-    }
   }, []);
-  useEffect(() => { const start = setTimeout(() => void load(), 1500), timer = setInterval(() => { if (document.visibilityState === "visible") void load(); }, 60_000); return () => { clearTimeout(start); clearInterval(timer); }; }, [load]);
-  async function refresh() { setChecking(true); await load(); setChecking(false); }
+  // Poll gently: first check shortly after paint, then back off (1m, 2m, 5m) while nothing
+  // changes, every 10s while a sync is running, and not at all while the tab is hidden (it
+  // catches up the moment the tab is shown again).
+  const quiet = useRef(0);
+  useEffect(() => { quiet.current = 0; }, [changed]);
+  const running = status?.state === "running";
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined, cancelled = false;
+    const schedule = (delay: number) => { timer = setTimeout(tick, delay); };
+    const tick = async () => {
+      if (cancelled) return;
+      if (document.visibilityState !== "visible") return; // resumed by visibilitychange
+      await load();
+      if (cancelled) return;
+      const delay = running ? RUNNING_POLL_MS : POLL_MS[Math.min(quiet.current, POLL_MS.length - 1)];
+      quiet.current += 1;
+      schedule(delay);
+    };
+    const onVisible = () => { if (document.visibilityState === "visible" && !cancelled) { clearTimeout(timer); void tick(); } };
+    schedule(1500);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => { cancelled = true; clearTimeout(timer); document.removeEventListener("visibilitychange", onVisible); };
+  }, [load, running]);
+  async function refresh() { setChecking(true); await load(true); setChecking(false); }
   const syncNow = useCallback(async () => {
     if(syncing)return;
     setSyncing(true); setError("");
@@ -94,7 +134,7 @@ function useSyncController() {
       }
       for (let attempt = 0; attempt < 40; attempt++) {
         await new Promise(resolve => setTimeout(resolve, 1500));
-        const current = await load();
+        const current = await load(true);
         if (!current) break;
         if (!current.jobs.some(job => job.manual && ["queued", "leased", "running"].includes(job.status))) { router.refresh(); break; }
       }

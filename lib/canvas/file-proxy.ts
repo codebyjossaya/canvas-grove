@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import "server-only";
 import { request as httpsRequest } from "node:https";
 import type { IncomingMessage } from "node:http";
@@ -147,7 +148,7 @@ async function signedFileLocation(ctx: AuthContext, session: HostedSession, meta
 }
 
 /** Stream one Canvas file by its Canvas id. Canvas itself enforces access with the user's session. */
-export async function proxyCanvasFile(ctx: AuthContext, canvasFileId: string, inline: boolean): Promise<Response> {
+export async function proxyCanvasFile(ctx: AuthContext, canvasFileId: string, inline: boolean, ifNoneMatch?: string | null): Promise<Response> {
   if (!/^\d{1,20}$/.test(canvasFileId)) throw new ProxyError("INVALID_FILE", "Invalid Canvas file id.", 400);
   const { session, result } = await ownerCanvasGet(ctx, `/api/v1/files/${canvasFileId}`);
   if (result.authRequired) throw new ProxyError("CANVAS_AUTH_EXPIRED", "Canvas sign-in has expired. Reconnect Canvas.", 401);
@@ -156,15 +157,26 @@ export async function proxyCanvasFile(ctx: AuthContext, canvasFileId: string, in
   if (meta.locked_for_user === true || typeof meta.url !== "string" || !meta.url) {
     throw new ProxyError("CANVAS_FILE_LOCKED", typeof meta.lock_explanation === "string" ? meta.lock_explanation.replace(/<[^>]*>/g, "") : "This file is locked in Canvas.", 403);
   }
+  // Validator from Canvas's own file metadata (id, last modified, size): an unchanged file answers
+  // 304 here, skipping the signed-URL hop and the byte transfer entirely.
+  const etag = `"f-${canvasFileId}-${inline ? "i" : "a"}-${String(meta.modified_at ?? meta.updated_at ?? "")}-${String(meta.size ?? "")}"`;
+  if (ifNoneMatch && ifNoneMatch.split(",").some(candidate => candidate.trim() === etag)) return new Response(null, { status: 304, headers: { etag, "cache-control": "private, max-age=300" } });
   const response = await fetchPublic(await signedFileLocation(ctx, session, meta.url), session.canvasOrigin, true);
   const type = String(meta["content-type"] ?? response.headers["content-type"] ?? "application/octet-stream");
   const declared = Number(response.headers["content-length"]);
-  return new Response(webStream(response), { status: 200, headers: proxyHeaders(type, String(meta.display_name ?? meta.filename ?? "file"), inline, Number.isFinite(declared) ? declared : undefined) });
+  const headers = proxyHeaders(type, String(meta.display_name ?? meta.filename ?? "file"), inline, Number.isFinite(declared) ? declared : undefined);
+  if (meta.modified_at || meta.updated_at) headers.set("etag", etag);
+  return new Response(webStream(response), { status: 200, headers });
 }
 
 /** Canvas renders LaTeX to SVG at /equation_images/<latex>. Public on Canvas; fetched cookie-less. */
-export async function proxyEquationImage(ctx: AuthContext, pathAndQuery: string): Promise<Response> {
+export async function proxyEquationImage(ctx: AuthContext, pathAndQuery: string, ifNoneMatch?: string | null): Promise<Response> {
   if (!/^\/equation_images\/\S{1,4000}$/.test(pathAndQuery) || pathAndQuery.includes("..")) throw new ProxyError("INVALID_EQUATION", "Invalid equation image path.", 400);
+  // The path is the LaTeX itself, so the rendered SVG for a given path never changes: validate by path
+  // alone and answer 304 before touching the DB or Canvas.
+  const etag = `"eq-${createHash("sha1").update(pathAndQuery).digest("base64url").slice(0, 22)}"`;
+  const cacheControl = "private, max-age=604800, immutable";
+  if (ifNoneMatch && ifNoneMatch.split(",").some(candidate => candidate.trim() === etag)) return new Response(null, { status: 304, headers: { etag, "cache-control": cacheControl } });
   const session = await activeCanvasSession(ctx);
   const target = new URL(pathAndQuery, session.canvasOrigin);
   if (target.origin !== new URL(session.canvasOrigin).origin || !target.pathname.startsWith("/equation_images/")) throw new ProxyError("INVALID_EQUATION", "Invalid equation image path.", 400);
@@ -172,7 +184,8 @@ export async function proxyEquationImage(ctx: AuthContext, pathAndQuery: string)
   const type = String(response.headers["content-type"] ?? "image/svg+xml");
   if (!/^image\//i.test(type)) { response.destroy(); throw new ProxyError("INVALID_EQUATION", "Canvas did not return an image.", 502); }
   const headers = proxyHeaders(type, "equation.svg", true);
-  headers.set("cache-control", "private, max-age=86400");
+  headers.set("cache-control", cacheControl);
+  headers.set("etag", etag);
   return new Response(webStream(response), { status: 200, headers });
 }
 

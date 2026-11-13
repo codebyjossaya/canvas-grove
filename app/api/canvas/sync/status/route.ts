@@ -3,6 +3,7 @@ import { and, desc, eq } from "drizzle-orm";
 import { ensureUserForClerk } from "@/lib/db/auth-context";
 import { withTenantTransaction } from "@/lib/db";
 import { syncCursors, syncJobs } from "@/lib/db/schema";
+import { createHash } from "node:crypto";
 import { errorJson, json } from "@/lib/bridge/http";
 import { syncPolicies, type SyncKind } from "@/lib/sync/catalog";
 import { enqueueManualSync } from "@/lib/sync/manual";
@@ -20,7 +21,7 @@ export async function POST() {
   } catch (error) { return errorJson(error); }
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   const session = await auth();
   if (!session.isAuthenticated || !session.userId) return errorJson(new Error("Authentication required"), 401);
   const ctx = await ensureUserForClerk(session.userId);
@@ -30,7 +31,7 @@ export async function GET() {
     return { cursors, recentJobs };
   });
   const now = Date.now();
-  return json({
+  return conditionalJson(request, {
     resources: result.cursors.map((cursor) => {
       const policy = syncPolicies[cursor.resourceType as SyncKind];
       const lastSuccessAt = cursor.lastSuccessAt?.toISOString() ?? null;
@@ -38,4 +39,13 @@ export async function GET() {
     }),
     jobs: result.recentJobs.map((job) => ({ id: job.id, accountId: job.canvasAccountId, kind: job.kind, status: job.status, attempt: job.attempt, runAfter: job.runAfter.toISOString(), finishedAt: job.finishedAt?.toISOString() ?? null, errorCode: job.errorCode, manual: (job.scope as { reason?: string } | null)?.reason === "manual_sync" })),
   });
+}
+
+/** Private + revalidating: an unchanged status answers 304 with no body, so frequent polls stay cheap. */
+function conditionalJson(request: Request, value: unknown) {
+  const body = JSON.stringify(value);
+  const etag = `"${createHash("sha1").update(body).digest("base64url").slice(0, 22)}"`;
+  const headers = { "cache-control": "private, no-cache", etag };
+  if (request.headers.get("if-none-match") === etag) return new Response(null, { status: 304, headers });
+  return new Response(body, { status: 200, headers: { ...headers, "content-type": "application/json" } });
 }

@@ -27,6 +27,19 @@ export async function readPreview(id: string, clerkUserId: string): Promise<Prev
 
 export type StoredExecution = { replay: boolean; ok: boolean; status: number; authRequired: boolean; data?: unknown; error?: string };
 
+/** Read a completed operation before mutable preflight checks, while preserving request binding. */
+export async function readHostedOperation(clerkUserId: string, key: string, request: CanvasRequest): Promise<StoredExecution | null> {
+  const ctx = await ensureUserForClerk(clerkUserId);
+  const requestHash = digest(canonicalJson(request));
+  return withTenantTransaction(ctx.ownerId, async (tx) => {
+    const [existing] = await tx.select().from(idempotencyKeys).where(and(eq(idempotencyKeys.ownerId, ctx.ownerId), eq(idempotencyKeys.key, key))).limit(1);
+    if (!existing) return null;
+    if (existing.requestHash !== requestHash) throw new Error("Idempotency key was already used for a different request");
+    if (existing.responseBodyRedacted) return { ...(existing.responseBodyRedacted as Omit<StoredExecution, "replay">), replay: true };
+    throw new Error("An operation with this idempotency key is already in progress");
+  });
+}
+
 export async function beginHostedOperation(clerkUserId: string, key: string, request: CanvasRequest): Promise<{ operationId: string } | { prior: StoredExecution }> {
   const ctx = await ensureUserForClerk(clerkUserId);
   const requestHash = digest(canonicalJson(request));

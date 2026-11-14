@@ -1,7 +1,8 @@
 import "server-only";
 import { withTenantSql } from "@/lib/db";
 import type { AuthContext } from "@/lib/db/auth-context";
-import { executeCanvasApiForSession, executeInHostedSession, hostedSessionStore, replayInHostedSession, type HostedExecutionResult, type HostedSession } from "@/lib/bridge/hosted-browser";
+import { executeCanvasApiForSession, executeInHostedSession, hostedSessionStore, type HostedExecutionResult, type HostedSession } from "@/lib/bridge/hosted-browser";
+import { readHostedOperation } from "@/lib/bridge/postgres-operations";
 import { BridgeError } from "@/lib/bridge/errors";
 import {
   AssignmentSubmissionInputError,
@@ -97,7 +98,7 @@ export async function submitAssignment(ctx: AuthContext, assignmentId: string, i
   // course/assignment ids at two institutions from replaying each other's receipt.
   const operationKey = `assignment:${row.canvas_account_id}:${idempotencyKey}`;
   let prior: HostedExecutionResult | null;
-  try { prior = await replayInHostedSession({ ownerId: ctx.clerkUserId, idempotencyKey: operationKey, request }); }
+  try { prior = await readHostedOperation(ctx.clerkUserId, operationKey, request); }
   catch (error) { operationError(error); }
   if (prior) return finishReceipt(ctx, row, null, prior);
   const session = await assignmentSession(ctx, row);

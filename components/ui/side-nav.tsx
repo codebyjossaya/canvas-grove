@@ -39,6 +39,7 @@ function ActiveNav() { return <NavLinks active={activeHref(useActive())} />; }
 
 function NavLinks({ active }: { active: string | null }) {
   return <nav className="side-nav" aria-label="Workspace">
+    <span className="sidebar-nav-label" aria-hidden="true">Workspace</span>
     {primaryLinks.map(item => <AppLink key={item.href} href={item.href} aria-current={active === item.href ? "page" : undefined}>{active === item.href && <ActiveMarker name="nav-pill" className="nav-pill" />}<Icon name={item.icon} /><span>{item.label}</span><span className="hint" aria-hidden="true"><kbd className="kbd">G</kbd> <kbd className="kbd">{item.key.toUpperCase()}</kbd></span></AppLink>)}
   </nav>;
 }

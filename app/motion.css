@@ -8,14 +8,14 @@
   /* Damped spring (zeta about .72): about 4% overshoot, settles cleanly. */
   --ease-spring:linear(0,.028,.098,.194,.303,.415,.524,.625,.715,.793,.858,.911,.952,.983,1.006,1.022,1.032,1.037,1.038,1.038,1.035,1.031,1.027,1.023,1.019,1.015,1.011,1.008,1.006,1.004,1.002,1.001,1);
   --ease-out-expo:cubic-bezier(.16,1,.3,1);
-  --vt-exit:90ms;--vt-enter:160ms;--vt-move:220ms;
+  --vt-exit:120ms;--vt-enter:220ms;--vt-move:280ms;
   interpolate-size:allow-keywords;
 }
 
 /* ---- view transitions: shared ---- */
 ::view-transition{pointer-events:none}
 /* The shell (sidebar, top bar) lives in the root snapshot: keep its crossfade brief. */
-::view-transition-group(root){animation-duration:160ms}
+::view-transition-group(root){animation-duration:220ms}
 
 @keyframes vt-fade-out{to{opacity:0}}
 @keyframes vt-fade-in{from{opacity:0}}
@@ -56,7 +56,8 @@
 .side-nav a,.sidebar-link,.sidebar-course{isolation:isolate}
 .sidebar-course{position:relative}
 .side-nav a[aria-current="page"],.sidebar-link[aria-current="page"],.sidebar-course[aria-current="page"]{background:transparent}
-.nav-pill{position:absolute;inset:0;z-index:-1;border-radius:inherit;background:var(--sidebar-surface);pointer-events:none}
+.nav-pill{position:absolute;inset:0;z-index:-1;border-radius:inherit;background:var(--sidebar-active);box-shadow:var(--sidebar-active-shadow);pointer-events:none}
+.sidebar-course .nav-pill{background:color-mix(in srgb,var(--c,var(--accent-primary)) 16%,var(--sidebar-surface));box-shadow:inset 3px 0 0 var(--c,var(--accent-primary))}
 .tabbar a,.tabbar button{position:relative}
 .tab-pill{position:absolute;top:0;left:50%;width:32px;height:3px;margin-left:-16px;border-radius:0 0 3px 3px;background:var(--accent-primary);pointer-events:none}
 

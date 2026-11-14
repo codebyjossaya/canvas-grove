@@ -17,6 +17,8 @@ export type AssignmentDetail = {
   quizHref: string | null;
   /** Work happens in an external tool (LTI) that only Canvas can launch. */
   externalTool: boolean;
+  /** Fast local UX gate only; the submit service re-checks the current Canvas assignment. */
+  submissionAdvisory: string | null;
   syncedAt: string | null;
 };
 
@@ -30,12 +32,12 @@ export async function loadAssignmentDetail(ctx: AuthContext, courseId: string, a
     const owner = ctx.ownerId;
     // Row, course (+ its Canvas account) and latest submission are independent: one pipelined batch.
     const [[row], [courseJoin], [sub]] = await Promise.all([
-      tx.select({ id: assignments.id, name: assignments.name, dueAt: assignments.dueAt, unlockAt: assignments.unlockAt, lockAt: assignments.lockAt, points: assignments.pointsPossible, submissionTypes: assignments.submissionTypes, descriptionHtml: assignments.descriptionHtml, payload: assignments.sourcePayload, canvasAssignmentId: assignments.canvasAssignmentId })
+      tx.select({ id: assignments.id, name: assignments.name, dueAt: assignments.dueAt, unlockAt: assignments.unlockAt, lockAt: assignments.lockAt, points: assignments.pointsPossible, submissionTypes: assignments.submissionTypes, workflowState: assignments.workflowState, descriptionHtml: assignments.descriptionHtml, payload: assignments.sourcePayload, canvasAssignmentId: assignments.canvasAssignmentId })
       .from(assignments).where(and(eq(assignments.ownerId, owner), eq(assignments.id, assignmentId), eq(assignments.courseId, courseId), isNull(assignments.deletedAt))).limit(1),
       tx.select({ id: courses.id, name: courses.name, courseCode: courses.courseCode, canvasCourseId: courses.canvasCourseId, origin: canvasAccounts.canvasBaseUrl }).from(courses)
         .leftJoin(canvasAccounts, and(eq(canvasAccounts.ownerId, owner), eq(canvasAccounts.id, courses.canvasAccountId)))
         .where(and(eq(courses.ownerId, owner), eq(courses.id, courseId), isNull(courses.deletedAt))).limit(1),
-      tx.select({ state: submissions.state, late: submissions.late, missing: submissions.missing, excused: submissions.excused, submittedAt: submissions.submittedAt, score: submissions.score, grade: submissions.grade, syncedAt: submissions.syncedAt })
+      tx.select({ state: submissions.state, attempt: submissions.attempt, late: submissions.late, missing: submissions.missing, excused: submissions.excused, submittedAt: submissions.submittedAt, score: submissions.score, grade: submissions.grade, syncedAt: submissions.syncedAt })
         .from(submissions).where(and(eq(submissions.ownerId, owner), eq(submissions.assignmentId, assignmentId))).orderBy(desc(submissions.attempt)).limit(1),
     ]);
     if (!row || !courseJoin) return null;
@@ -55,6 +57,20 @@ export async function loadAssignmentDetail(ctx: AuthContext, courseId: string, a
         .where(and(eq(quizzes.ownerId, owner), eq(quizzes.courseId, courseId), eq(quizzes.canvasAssignmentId, row.canvasAssignmentId), isNull(quizzes.deletedAt))).limit(1),
     ]);
     const summary = sub ? { ...sub, submittedAt: iso(sub.submittedAt), score: num(sub.score) } : null;
+    const now = Date.now();
+    const unlockAt = row.unlockAt ? new Date(row.unlockAt).getTime() : null;
+    const lockAt = row.lockAt ? new Date(row.lockAt).getTime() : null;
+    const allowedAttempts = payload.allowed_attempts == null || payload.allowed_attempts === "" ? NaN : Number(payload.allowed_attempts);
+    const lockExplanation = typeof payload.lock_explanation === "string" ? payload.lock_explanation.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim() : "";
+    const submissionAdvisory = row.workflowState === "unpublished" || payload.published === false
+      ? "This assignment is not published in Canvas."
+      : payload.locked_for_user === true || lockAt != null && lockAt <= now
+        ? lockExplanation || "This assignment is locked in Canvas."
+        : unlockAt != null && unlockAt > now
+          ? "This assignment is not open yet."
+          : summary && Number.isInteger(allowedAttempts) && allowedAttempts >= 0 && summary.attempt >= allowedAttempts
+            ? "No submission attempts remain in Canvas."
+            : null;
     return {
       id: row.id, courseId: course.id, courseName: course.name, courseCode: course.courseCode ?? null, title: row.name,
       dueAt: iso(row.dueAt), unlockAt: iso(row.unlockAt), lockAt: iso(row.lockAt), points, submissionTypes: types,
@@ -64,6 +80,7 @@ export async function loadAssignmentDetail(ctx: AuthContext, courseId: string, a
       canvasUrl: payloadUrl ?? fallbackUrl,
       quizHref: quiz?.supported ? `/quizzes/${quiz.id}` : null,
       externalTool: types.includes("external_tool"),
+      submissionAdvisory,
       syncedAt: iso(sub?.syncedAt),
     };
   });

@@ -8,6 +8,7 @@ import { formatInstant } from "@/lib/time";
 import type { AssignmentDetail } from "@/lib/views/assignment-detail";
 import styles from "./assignment-detail.module.css";
 import { NAV_BACK } from "@/components/ui/page-transition";
+import { AssignmentSubmissionForm } from "./assignment-submission-form";
 
 const when = (value: string | null, zone: string) => value ? formatInstant(value, zone, { weekday: "short", month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" }) : null;
 const TYPE_LABELS: Record<string, string> = { online_upload: "File upload", online_text_entry: "Text entry", online_url: "Website URL", online_quiz: "Quiz", external_tool: "External tool", media_recording: "Media recording", discussion_topic: "Discussion", on_paper: "On paper", none: "No submission", student_annotation: "Annotation" };
@@ -43,6 +44,7 @@ export function AssignmentDetailView({ detail }: { detail: AssignmentDetail }) {
     </header>
     {detail.externalTool && !detail.quizHref && <p className={styles.note}>This assignment is completed in an external tool that only Canvas can launch. Grove shows its status and syncs it about every 15 minutes.</p>}
     <dl className={styles.facts}>{shown.map(([label, value]) => <div key={label}><dt>{label}</dt><dd className="num">{value}</dd></div>)}</dl>
+    {!detail.quizHref && !detail.externalTool && !detail.submissionTypes.includes("online_quiz") && <AssignmentSubmissionForm assignmentId={detail.id} submissionTypes={detail.submissionTypes} submitted={detail.submitted} advisory={detail.submissionAdvisory} canvasUrl={detail.canvasUrl} />}
     <section className={styles.card} aria-labelledby="assignment-description">
       <h2 id="assignment-description">Description</h2>
       {detail.descriptionHtml

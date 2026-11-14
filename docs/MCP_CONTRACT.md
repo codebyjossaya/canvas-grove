@@ -58,7 +58,21 @@ includes `syncedAt` so the model knows freshness. Results are capped (about 40k 
 `grove_status`, `list_courses`, `get_course`, `list_assignments` (filters: course, status, due window),
 `get_assignment`, `upcoming` (next N days across courses), `grades` (all or per course),
 `list_announcements`, `list_pages`, `get_page`, `list_files` (metadata only), `list_quizzes`
-(metadata only), `search` (across courses, assignments, pages).
+(metadata only, plus the user's attempts so far and latest kept score; paged with `cursor`), `search`
+(across courses, assignments, pages, announcements, quiz titles and file names), `calendar`.
+
+* `upcoming` also returns `quizzes` (dated quizzes that are not Canvas assignments, such as practice
+  quizzes and surveys, which assignment lists never showed) and `events` (the user's own Grove
+  calendar events from `custom_events`).
+* `calendar` (`from`, `to` ISO date-times, at most 120 days; optional `course`): one chronological
+  `entries` list of `kind: "assignment" | "quiz" | "event"` items with an `at` time, for week or
+  month planning. Grove-local data only.
+* Text conversion (`lib/mcp/content.ts` `htmlToText`): math is LaTeX between `\(` and `\)` (Canvas
+  equation images, from `data-equation-content`, the `LaTeX:` alt or the image path; MathML via its
+  TeX annotation; screen-reader MathML copies are dropped), other images `[image: alt]`, audio/video
+  `[video: open in Canvas]`, `<sub>/<sup>` as `_{}`/`^{}`, quiz inputs `[blank N]` and dropdowns
+  `[dropdown N: a | b]`. Before this, relative image srcs (including Grove's own equation proxy)
+  were dropped with their LaTeX, so math vanished from pages, assignments and quiz questions.
 
 **Policy (decided, keep):**
 * No tool returns quiz questions, quiz answers, or anything that helps complete a graded quiz.

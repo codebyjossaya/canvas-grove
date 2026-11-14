@@ -85,6 +85,35 @@ function assignmentsQuery(tx: Tx, ownerId: string, where: postgres.PendingQuery<
     ) x where true ${where} ${order} limit ${limit} offset ${offset}`;
 }
 
+const CALENDAR_MAX_DAYS = 120;
+
+/** The user's own Grove calendar events (custom_events, Grove-only) overlapping [from, to); same rule as lib/custom-events/store. */
+async function customEvents(tx: Tx, ownerId: string, from: Date, to: Date, courseId?: string) {
+  const fromDay = new Date(from.getTime() - 86_400_000).toISOString().slice(0, 10), toDay = new Date(to.getTime() + 86_400_000).toISOString().slice(0, 10);
+  const rows = await tx<{ id: string; title: string; notes: string | null; all_day: boolean; starts_at: Stamp; ends_at: Stamp; start_date: string | null; end_date: string | null; canvas_course_id: string | null; course_name: string | null }[]>`
+    select e.id, e.title, e.notes, e.all_day, e.starts_at, e.ends_at, e.start_date::text as start_date, e.end_date::text as end_date, c.canvas_course_id, c.name as course_name
+    from custom_events e left join courses c on c.owner_id = e.owner_id and c.id = e.course_id and c.deleted_at is null
+    where e.owner_id = ${ownerId} ${courseId ? tx`and e.course_id = ${courseId}` : tx``}
+      and ((not e.all_day and e.starts_at < ${to.toISOString()} and e.ends_at >= ${from.toISOString()}) or (e.all_day and e.start_date <= ${toDay}::date and e.end_date >= ${fromDay}::date))
+    order by coalesce(e.starts_at, e.start_date::timestamptz) limit 300`;
+  return rows.map((e) => ({
+    eventId: e.id, title: e.title, notes: e.notes, allDay: e.all_day, startsAt: iso(e.starts_at), endsAt: iso(e.ends_at), startDate: e.start_date, endDate: e.end_date,
+    courseId: e.canvas_course_id, course: e.course_name, source: "grove_calendar",
+  }));
+}
+
+/** Quizzes with a due date in [from, to) that are not Canvas assignments (practice quizzes, surveys), so assignment lists miss them. */
+async function standaloneQuizzes(tx: Tx, ownerId: string, from: Date, to: Date, courseId?: string) {
+  const rows = await tx<{ canvas_quiz_id: string; title: string; quiz_type: string | null; due_at: Stamp; points_possible: unknown; canvas_course_id: string; course_name: string; taken: boolean }[]>`
+    select q.canvas_quiz_id, q.title, q.quiz_type, q.due_at, q.points_possible, c.canvas_course_id, c.name as course_name,
+      exists (select 1 from quiz_attempts a where a.owner_id = q.owner_id and a.quiz_id = q.id and (a.finished_at is not null or a.workflow_state in ('complete', 'graded', 'pending_review'))) as taken
+    from quizzes q join courses c on c.owner_id = q.owner_id and c.id = q.course_id
+    where q.owner_id = ${ownerId} and q.deleted_at is null and c.deleted_at is null and q.canvas_assignment_id is null
+      and q.due_at >= ${from.toISOString()} and q.due_at < ${to.toISOString()} ${courseId ? tx`and q.course_id = ${courseId}` : tx``}
+    order by q.due_at limit 200`;
+  return rows.map((q) => ({ quizId: q.canvas_quiz_id, courseId: q.canvas_course_id, course: q.course_name, title: q.title, type: q.quiz_type, dueAt: iso(q.due_at), pointsPossible: num(q.points_possible), taken: q.taken }));
+}
+
 const truncatedList = (key: string, items: unknown[], offset: number, extra: Data = {}) => (slice: unknown[], cut: boolean) => ({
   ...extra, count: slice.length, truncated: cut || extra.truncated === true, [key]: slice,
   ...(cut || extra.truncated === true ? { nextCursor: String(offset + slice.length) } : {}),
@@ -201,13 +230,40 @@ export function registerTools(server: McpServer, ownerId: string, scopes: string
 
   server.registerTool("upcoming", {
     title: "Upcoming work",
-    description: "Everything due in the next N days across all courses that is not yet submitted (set includeSubmitted to see all), soonest first.",
+    description: "Everything due in the next N days across all courses that is not yet submitted (set includeSubmitted to see all), soonest first. Also lists quizzes that are not Canvas assignments (practice quizzes, surveys) due in the window and the user's own Grove calendar events.",
     inputSchema: { days: z.number().int().min(1).max(60).default(7).describe("Look-ahead window in days (default 7)"), includeSubmitted: z.boolean().default(false) }, annotations: READ_ONLY,
   }, ({ days, includeSubmitted }) => run("upcoming", async (tx) => {
+    const from = new Date(), to = new Date(from.getTime() + days * 86_400_000);
     const rows = await assignmentsQuery(tx, ownerId,
       tx`and due_at >= now() and due_at < now() + ${`${days} days`}::interval ${includeSubmitted ? tx`` : tx`and status in ('upcoming', 'past_due', 'missing')`}`,
       tx`order by due_at asc`, 300, 0);
-    return fitItems(rows.map(assignmentOut), truncatedList("items", rows, 0, { days, now: new Date().toISOString() }));
+    const quizzes = (await standaloneQuizzes(tx, ownerId, from, to)).filter((q) => includeSubmitted || !q.taken);
+    const events = await customEvents(tx, ownerId, from, to);
+    return fitItems(rows.map(assignmentOut), truncatedList("items", rows, 0, { days, now: from.toISOString(), quizzes, events }));
+  })());
+
+  server.registerTool("calendar", {
+    title: "Calendar",
+    description: "Everything dated between from and to (at most 120 days): assignment due dates with submission status, quizzes that are not assignments, and the user's own Grove calendar events, merged and sorted by time. Use for week or month planning.",
+    inputSchema: {
+      from: z.string().datetime({ offset: true }).describe("ISO date-time, start of the range"),
+      to: z.string().datetime({ offset: true }).describe("ISO date-time, end of the range (at most 120 days after from)"),
+      course: courseRef.optional(),
+    }, annotations: READ_ONLY,
+  }, ({ from, to, course }) => run("calendar", async (tx) => {
+    const start = new Date(from), end = new Date(to);
+    if (!(end > start)) throw new ToolError("to must be after from.");
+    if (end.getTime() - start.getTime() > CALENDAR_MAX_DAYS * 86_400_000) throw new ToolError(`The range can be at most ${CALENDAR_MAX_DAYS} days.`);
+    const c = course ? await resolveCourse(tx, ownerId, course) : null;
+    const rows = await assignmentsQuery(tx, ownerId, tx`and due_at >= ${start.toISOString()} and due_at < ${end.toISOString()} ${c ? tx`and course_id = ${c.id}` : tx``}`, tx`order by due_at asc`, 500, 0);
+    const quizzes = await standaloneQuizzes(tx, ownerId, start, end, c?.id);
+    const events = await customEvents(tx, ownerId, start, end, c?.id);
+    const entries = [
+      ...rows.map((a) => ({ kind: "assignment", at: iso(a.due_at), ...assignmentOut(a) })),
+      ...quizzes.map((q) => ({ kind: "quiz", at: q.dueAt, ...q })),
+      ...events.map((e) => ({ kind: "event", at: e.startsAt ?? `${e.startDate}T00:00:00.000Z`, ...e })),
+    ].sort((x, y) => String(x.at).localeCompare(String(y.at)));
+    return fitItems(entries, truncatedList("entries", entries, 0, { from: start.toISOString(), to: end.toISOString(), ...(c ? { courseId: c.canvas_course_id } : {}) }));
   })());
 
   server.registerTool("grades", {
@@ -294,22 +350,31 @@ export function registerTools(server: McpServer, ownerId: string, scopes: string
 
   server.registerTool("list_quizzes", {
     title: "List quizzes",
-    description: "Quiz metadata only (title, due dates, points, question count, time limit, attempts). Never returns quiz questions or answers.",
-    inputSchema: { course: courseRef.optional(), limit: limitArg(200, 50) }, annotations: READ_ONLY,
-  }, ({ course, limit }) => run("list_quizzes", async (tx) => {
+    description: "Quiz metadata only (title, due dates, points, question count, time limit, attempts allowed, and the user's attempts so far with the latest kept score). Never returns quiz questions or answers. Paged: pass nextCursor when truncated.",
+    inputSchema: { course: courseRef.optional(), limit: limitArg(200, 50), cursor: cursorArg }, annotations: READ_ONLY,
+  }, ({ course, limit, cursor }) => run("list_quizzes", async (tx) => {
     const c = course ? await resolveCourse(tx, ownerId, course) : null;
-    const rows = await tx<{ canvas_quiz_id: string; title: string; engine: string; quiz_type: string | null; points_possible: unknown; question_count: number | null; time_limit_minutes: number | null; allowed_attempts: number | null; due_at: Stamp; unlock_at: Stamp; lock_at: Stamp; published: boolean; locked_for_user: boolean; html_url: string | null; canvas_course_id: string; course_name: string; supported: boolean; description_html: string | null; source_payload: unknown }[]>`
-      select q.canvas_quiz_id, q.title, q.engine, q.quiz_type, q.supported, q.description_html, q.source_payload, q.points_possible, q.question_count, q.time_limit_minutes, q.allowed_attempts, q.due_at, q.unlock_at, q.lock_at, q.published, q.locked_for_user, q.html_url, c.canvas_course_id, c.name as course_name
+    const offset = offsetOf(cursor);
+    const rows = await tx<{ canvas_quiz_id: string; title: string; engine: string; quiz_type: string | null; points_possible: unknown; question_count: number | null; time_limit_minutes: number | null; allowed_attempts: number | null; due_at: Stamp; unlock_at: Stamp; lock_at: Stamp; published: boolean; locked_for_user: boolean; html_url: string | null; canvas_course_id: string; course_name: string; supported: boolean; description_html: string | null; source_payload: unknown; attempts_taken: number; latest_state: string | null; latest_kept_score: unknown; latest_finished_at: Stamp }[]>`
+      select q.canvas_quiz_id, q.title, q.engine, q.quiz_type, q.supported, q.description_html, q.source_payload, q.points_possible, q.question_count, q.time_limit_minutes, q.allowed_attempts, q.due_at, q.unlock_at, q.lock_at, q.published, q.locked_for_user, q.html_url, c.canvas_course_id, c.name as course_name,
+        coalesce(att.taken, 0)::int as attempts_taken, att.state as latest_state, att.kept_score as latest_kept_score, att.finished_at as latest_finished_at
       from quizzes q join courses c on c.owner_id = q.owner_id and c.id = q.course_id
+      left join lateral (
+        select max(a.attempt) filter (where a.finished_at is not null or a.workflow_state in ('complete', 'graded', 'pending_review')) as taken,
+          (array_agg(a.workflow_state order by a.attempt desc, a.updated_at desc))[1] as state,
+          (array_agg(a.kept_score order by a.attempt desc, a.updated_at desc))[1] as kept_score,
+          max(a.finished_at) as finished_at
+        from quiz_attempts a where a.owner_id = q.owner_id and a.quiz_id = q.id) att on true
       where q.owner_id = ${ownerId} and q.deleted_at is null and c.deleted_at is null ${c ? tx`and q.course_id = ${c.id}` : tx``}
-      order by q.due_at asc nulls last, q.title limit ${limit}`;
-    const items = rows.map((q) => ({ quizId: q.canvas_quiz_id, courseId: q.canvas_course_id, course: q.course_name, title: q.title, engine: q.engine, type: q.quiz_type, ...quizClassification(q.quiz_type), pointsPossible: num(q.points_possible), questionCount: q.question_count, timeLimitMinutes: q.time_limit_minutes, allowedAttempts: q.allowed_attempts, dueAt: iso(q.due_at), unlockAt: iso(q.unlock_at), lockAt: iso(q.lock_at), published: q.published, locked: q.locked_for_user, url: q.html_url, ...eligibilityOut(q) }));
-    return fitItems(items, truncatedList("quizzes", items, 0));
+      order by q.due_at asc nulls last, q.title limit ${limit + 1} offset ${offset}`;
+    const items = rows.slice(0, limit).map((q) => ({ quizId: q.canvas_quiz_id, courseId: q.canvas_course_id, course: q.course_name, title: q.title, engine: q.engine, type: q.quiz_type, ...quizClassification(q.quiz_type), pointsPossible: num(q.points_possible), questionCount: q.question_count, timeLimitMinutes: q.time_limit_minutes, allowedAttempts: q.allowed_attempts, dueAt: iso(q.due_at), unlockAt: iso(q.unlock_at), lockAt: iso(q.lock_at), published: q.published, locked: q.locked_for_user, url: q.html_url,
+      attempts: { taken: q.attempts_taken, latestState: q.latest_state, keptScore: num(q.latest_kept_score), lastFinishedAt: iso(q.latest_finished_at) }, ...eligibilityOut(q) }));
+    return fitItems(items, truncatedList("quizzes", items, offset, { truncated: rows.length > limit }));
   })());
 
   server.registerTool("search", {
     title: "Search",
-    description: "Search course names, assignments (titles and instructions), pages (titles and bodies) and file names across all courses.",
+    description: "Search course names, assignments (titles and instructions), pages (titles and bodies), announcements (titles and text), quiz titles and file names across all courses.",
     inputSchema: { query: z.string().min(2).max(100), limit: limitArg(50, 20) }, annotations: READ_ONLY,
   }, ({ query, limit }) => run("search", async (tx) => {
     const like = likePattern(query);
@@ -329,11 +394,19 @@ export function registerTools(server: McpServer, ownerId: string, scopes: string
     const files = await tx<{ canvas_file_id: string; display_name: string; content_type: string | null; canvas_course_id: string; course_name: string }[]>`
       select f.canvas_file_id, f.display_name, f.content_type, c.canvas_course_id, c.name as course_name from course_files f join courses c on c.owner_id = f.owner_id and c.id = f.course_id
       where f.owner_id = ${ownerId} and f.deleted_at is null and c.deleted_at is null and f.display_name ilike ${like} order by f.display_name limit ${limit}`;
+    const announcements = await tx<{ canvas_announcement_id: string; title: string; body_html: string | null; posted_at: Stamp; canvas_course_id: string | null; course_name: string | null }[]>`
+      select a.canvas_announcement_id, a.title, a.body_html, a.posted_at, c.canvas_course_id, c.name as course_name from announcements a left join courses c on c.owner_id = a.owner_id and c.id = a.course_id
+      where a.owner_id = ${ownerId} and (a.title ilike ${like} or a.body_html ilike ${like}) order by (a.title ilike ${like}) desc, a.posted_at desc nulls last limit ${limit}`;
+    const quizzes = await tx<{ canvas_quiz_id: string; title: string; due_at: Stamp; canvas_course_id: string; course_name: string }[]>`
+      select q.canvas_quiz_id, q.title, q.due_at, c.canvas_course_id, c.name as course_name from quizzes q join courses c on c.owner_id = q.owner_id and c.id = q.course_id
+      where q.owner_id = ${ownerId} and q.deleted_at is null and c.deleted_at is null and q.title ilike ${like} order by q.due_at desc nulls last limit ${limit}`;
     const results = [
       ...courses.map((c) => ({ type: "course", courseId: c.canvas_course_id, title: c.name, code: c.course_code })),
       ...assignments.map((a) => ({ type: "assignment", assignmentId: a.canvas_assignment_id, courseId: a.canvas_course_id, course: a.course_name, title: a.name, dueAt: iso(a.due_at), match: snippet(a.description_html) })),
       ...pages.map((p) => ({ type: "page", page: p.canvas_page_url, courseId: p.canvas_course_id, course: p.course_name, title: p.title, match: snippet(p.body_html) })),
       ...files.map((f) => ({ type: "file", canvasFileId: f.canvas_file_id, courseId: f.canvas_course_id, course: f.course_name, title: f.display_name, contentType: f.content_type, downloadPath: fileDownloadPath(f.canvas_file_id) })),
+      ...announcements.map((a) => ({ type: "announcement", announcementId: a.canvas_announcement_id, courseId: a.canvas_course_id, course: a.course_name, title: a.title, postedAt: iso(a.posted_at), match: snippet(a.body_html) })),
+      ...quizzes.map((q) => ({ type: "quiz", quizId: q.canvas_quiz_id, courseId: q.canvas_course_id, course: q.course_name, title: q.title, dueAt: iso(q.due_at) })),
     ];
     return fitItems(results, truncatedList("results", results, 0, { query }));
   })());
@@ -345,4 +418,4 @@ function eligibilityOut(q: { engine: string; quiz_type: string | null; points_po
   return e.eligible ? { eligibleForAssistant: true } : { eligibleForAssistant: false, ineligibleReason: e.reason };
 }
 
-export const TOOL_NAMES = ["grove_status", "list_courses", "get_course", "list_assignments", "get_assignment", "upcoming", "grades", "list_announcements", "list_pages", "get_page", "list_files", "list_quizzes", "search"] as const;
+export const TOOL_NAMES = ["grove_status", "list_courses", "get_course", "list_assignments", "get_assignment", "upcoming", "grades", "list_announcements", "list_pages", "get_page", "list_files", "list_quizzes", "search", "calendar"] as const;

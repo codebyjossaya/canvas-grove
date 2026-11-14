@@ -9,7 +9,10 @@ import { quizClassification, sessionAllows } from "./action-policy";
 import { StageError, cancelConnectionAction, connectionAction, connectionActions, connectionOf, recordImmediate, stageAction, type Executor, type Preview, type StageOutcome } from "./actions";
 import { EXECUTABLE_TOOLS, executorFor } from "./executors";
 import { auditQuiz, endSession, loadQuiz, openSession, type ConnectionCols, type QuizRecord } from "./quiz-core";
-import { fitItems, htmlToText, untrusted } from "./content";
+import { fitItems, untrusted } from "./content";
+import { formatQuizQuestions } from "./quiz-format";
+import { fromNativeBundle, isOneQuestionAtATime, readCurrentAttempt } from "./quiz-read";
+import { BULK_MAX_ENTRIES, bulkSummary, planBulkAnswers, runBulkSave } from "./quiz-bulk";
 import type { BearerAuth } from "./store";
 
 // Phase-2 tools. Writes are staged for approval in Grove unless the connection's auto mode covers
@@ -280,33 +283,68 @@ export function registerPhase2Tools(server: McpServer, auth: BearerAuth) {
 
   server.registerTool("get_quiz_question", {
     title: "Get quiz questions",
-    description: "Questions of the approved quiz attempt (all, or one by questionId), with answer options and saved answers.",
-    inputSchema: { quiz: quizRef, questionId: z.string().regex(/^\d{1,20}$/).optional() }, annotations: READ,
-  }, ({ quiz, questionId }) => wrap("get_quiz_question", auth, async () => {
-    const { quiz: q, conn } = await sessionFor(auth, "get_quiz_question", quiz);
-    const bundle = await getCurrentAttempt(auth.ctx, q.id);
-    if (!bundle.nativeSupported) throw new ToolError(bundle.nativeBlock?.code ?? "QUIZ_NATIVE_BLOCKED", bundle.nativeBlock?.message ?? "This attempt must be finished in Canvas.");
-    const selected = questionId ? bundle.questions.filter((item) => item.id === questionId) : bundle.questions;
+    description: "The WHOLE approved quiz attempt in one call (default; pass questionId only to re-read one question): every question drawn for the attempt, including question-group picks, with type, points, group, text (math as LaTeX between \\( and \\), blanks and dropdowns as [blank N] / [dropdown N: …] markers), answer options, saved answers and the time left. Ones Grove cannot save have answerable=false and a note to answer them in Canvas. A very large quiz is split: truncated=true with nextCursor to fetch the rest.",
+    inputSchema: {
+      quiz: quizRef, questionId: z.string().regex(/^\d{1,20}$/).optional().describe("Only this question (omit to get the whole quiz)"),
+      cursor: z.string().regex(/^\d{1,4}$/).optional().describe("nextCursor from a truncated result"),
+    }, annotations: READ,
+  }, ({ quiz, questionId, cursor }) => wrap("get_quiz_question", auth, async () => {
+    // Read-only: one attempt-state read, then question pages and timer in parallel (no separate timer pre-check).
+    const q = await gate(auth, "get_quiz_question", quiz);
+    const conn = connCols(auth);
+    const session = await openSession(owner, conn, q.id);
+    const pre = sessionAllows(session, q.id);
+    if (!pre.ok) { await auditQuiz(owner, conn, "get_quiz_question", `blocked:${pre.code}`); throw new ToolError(pre.code, pre.message); }
+    const read = await (isOneQuestionAtATime(q) ? getCurrentAttempt(auth.ctx, q.id).then(fromNativeBundle) : readCurrentAttempt(auth.ctx, q)).catch(async (error) => {
+      if (!(error instanceof QuizServiceError && error.code === "NO_ACTIVE_ATTEMPT")) throw error;
+      await endSession(owner, session!.id);
+      await auditQuiz(owner, conn, "get_quiz_question", "blocked:attempt_not_active");
+      throw new ToolError("QUIZ_SESSION_ENDED", "The approved attempt is no longer active. A new attempt needs a new approval.");
+    });
+    const live = sessionAllows(session, q.id, { submissionId: read.submissionId, attempt: read.attempt });
+    if (!live.ok) { await endSession(owner, session!.id); await auditQuiz(owner, conn, "get_quiz_question", `blocked:${live.code}`); throw new ToolError(live.code, live.message); }
+    const selected = questionId ? read.questions.filter((item) => item.id === questionId) : read.questions;
     if (questionId && !selected.length) throw new ToolError("QUESTION_NOT_FOUND", "That question is not part of this attempt.");
     await auditQuiz(owner, conn, "get_quiz_question", "ok");
-    const questions = selected.map((item) => ({
-      questionId: item.id, position: item.position, type: item.type, points: item.pointsPossible,
-      text: untrusted(htmlToText(item.questionTextHtml, 8_000).text),
-      options: item.options.map((o) => ({ id: o.id, text: htmlToText(o.textHtml, 1_000).text })), savedAnswer: item.answer ?? null,
-    }));
-    return fitItems(questions, (slice, cut) => ({ quizId: q.id, attempt: bundle.attempt.attempt, count: slice.length, truncated: cut, questions: slice,
-      answerFormat: "multiple_choice/true_false: option id; multiple_answers: array of option ids; short_answer/essay: text; numerical/calculated: number" }));
+    const all = formatQuizQuestions(selected);
+    const offset = cursor ? Math.min(Number(cursor), all.length) : 0;
+    const questions = all.slice(offset);
+    const unanswerable = all.filter((item) => !item.answerable).length;
+    return fitItems(questions, (slice, cut) => ({ quizId: q.id, attempt: read.attempt, total: all.length, offset, count: slice.length, truncated: cut, ...(cut ? { nextCursor: String(offset + slice.length) } : {}), questions: slice, timing: read.timing,
+      ...(unanswerable ? { note: `${unanswerable} question(s) must be answered in Canvas (answerable=false). Tell the user before submitting.` } : {}),
+      ...(read.incomplete ? { incomplete: read.incomplete } : {}),
+      answerFormat: "multiple_choice/true_false: option id; multiple_answers: array of option ids; fill_in_multiple_blanks: object of blanks[].id -> text; short_answer/essay: text; numerical/calculated: number" }));
   })());
 
   server.registerTool("answer_quiz_question", {
     title: "Answer quiz question",
     description: "Save an answer for one question of the approved quiz attempt.",
-    inputSchema: { quiz: quizRef, questionId: z.string().regex(/^\d{1,20}$/), answer: z.union([z.string().max(16_384), z.number(), z.array(z.number().int()).max(50)]) }, annotations: { ...WRITE, idempotentHint: true },
+    inputSchema: { quiz: quizRef, questionId: z.string().regex(/^\d{1,20}$/), answer: z.union([z.string().max(16_384), z.number(), z.array(z.number().int()).max(50), z.record(z.string().min(1).max(128), z.string().max(16_384))]).describe("See answerFormat in get_quiz_question") }, annotations: { ...WRITE, idempotentHint: true },
   }, ({ quiz, questionId, answer }) => wrap("answer_quiz_question", auth, async () => {
     const { quiz: q, conn } = await sessionFor(auth, "answer_quiz_question", quiz);
     const saved = await saveAnswer(auth.ctx, q.id, questionId, answer, undefined, Date.now());
     await auditQuiz(owner, conn, "answer_quiz_question", "ok");
     return { saved: saved.saved, questionId, savedAt: saved.savedAt };
+  })());
+
+  server.registerTool("answer_quiz_questions", {
+    title: "Answer whole quiz",
+    description: "Save answers for many (or all) questions of the approved quiz attempt in one call: answers is a list of { questionId, answer } in the answerFormat from get_quiz_question. Same gate as answer_quiz_question (the approved entry session for this exact attempt; no extra approval). Every entry is validated first; the result lists each question as saved, rejected (with reason), unsupported_type, not_in_attempt, duplicate, failed or skipped, and a bad entry never blocks the others. Does NOT submit: call submit_quiz_attempt separately.",
+    inputSchema: {
+      quiz: quizRef,
+      answers: z.array(z.object({ questionId: z.string().regex(/^\d{1,20}$/), answer: z.unknown().describe("See answerFormat in get_quiz_question") })).min(1).max(BULK_MAX_ENTRIES),
+    }, annotations: { ...WRITE, idempotentHint: true },
+  }, ({ quiz, answers }) => wrap("answer_quiz_questions", auth, async () => {
+    const { quiz: q, conn } = await sessionFor(auth, "answer_quiz_questions", quiz);
+    const read = await (isOneQuestionAtATime(q) ? getCurrentAttempt(auth.ctx, q.id).then(fromNativeBundle) : readCurrentAttempt(auth.ctx, q));
+    const plan = planBulkAnswers(read.questions, answers.map((entry) => ({ questionId: entry.questionId, answer: entry.answer })));
+    const started = Date.now();
+    const results = await runBulkSave(plan,
+      (questionId, answer, index) => saveAnswer(auth.ctx, q.id, questionId, answer, undefined, started + index),
+      (error) => (error instanceof QuizServiceError ? { code: error.code, message: error.message } : null));
+    const { counts, unansweredQuestionIds } = bulkSummary(results, read.questions);
+    await auditQuiz(owner, conn, "answer_quiz_questions", counts.saved === results.length ? "ok" : `partial:${counts.saved ?? 0}/${results.length}`);
+    return { quizId: q.id, attempt: read.attempt, counts, results, unansweredQuestionIds, submitted: false, next: "Review the results, then call submit_quiz_attempt only when the user is ready to submit." };
   })());
 
   server.registerTool("submit_quiz_attempt", {

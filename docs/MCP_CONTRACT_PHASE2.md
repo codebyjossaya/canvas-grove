@@ -62,7 +62,24 @@ type, points, `eligibleForAssistant`), `start_quiz_attempt` (**the only approval
   "Let <assistant> take this <type>: it can read the questions, answer them and submit this attempt."
   A graded assessment also carries an explicit grade-impact warning. Approving creates an **entry-scoped quiz session**
   bound to (connection, quiz, attempt) that lasts until the attempt ends or 2 h, whichever is first.
-* **Inside a session no further approval is needed**: `get_quiz_question`, `answer_quiz_question` and
+* **Whole quiz in one call (the default):** `get_quiz_question` without `questionId` returns every
+  question drawn for the attempt (question-group picks included, with `groupId`): type, points,
+  text with LaTeX math and `[blank N]`/`[dropdown N: …]` markers, options, `blanks`, `matches`,
+  saved answers and `timing`. Nothing is dropped: a question Grove cannot save (multiple dropdowns,
+  matching, fill-in blanks whose ids Canvas hides, embedded media) comes back with
+  `answerable: false` and a `note`, and the result carries a top-level `note` with the count. Large
+  attempts are bounded (about 40k chars) with `truncated`, `total`, `offset` and `nextCursor`. It is
+  read-only (GET only; `lib/mcp/quiz-read.ts`): one session lookup and cookie-jar client per call,
+  the attempt state once, then question pages and timer in parallel. Pass `questionId` to re-read one.
+* **Whole-quiz answering:** `answer_quiz_questions` takes `answers: [{ questionId, answer }]` (up to
+  200) for the approved attempt, under the same entry-session gate as `answer_quiz_question` (no extra
+  approval, no submission). Every entry is validated against the attempt first
+  (`lib/mcp/quiz-bulk.ts`); results are per question: `saved`, `rejected` (code + reason),
+  `unsupported_type`, `not_in_attempt`, `duplicate`, `failed`, or `skipped` (after a fatal error such
+  as expired sign-in or a changed attempt). Saves run one at a time through the quiz service's
+  `saveAnswer` (its time/lock/attempt checks apply). `submit_quiz_attempt` stays a separate call.
+* **Inside a session no further approval is needed**: `get_quiz_question`, `answer_quiz_question`,
+  `answer_quiz_questions` and
   `submit_quiz_attempt` run immediately, but only for that exact attempt; any other quiz or attempt
   needs its own entry approval. Cancelling or revoking the connection ends the session.
 * **Technical eligibility gate (enforced server-side on every call, fail closed, never cached):** all

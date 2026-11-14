@@ -27,7 +27,7 @@ test("required extension orientation links to the real in-app installation flow"
   assert.ok("installHref" in step);
   assert.equal(step.installHref, EXTENSION_INSTALL_PATH);
   assert.equal(EXTENSION_INSTALL_PATH, "/extension/connect");
-  assert.match(EXTENSION_DOWNLOAD_URL, /\/releases\/latest$/);
+  assert.equal(EXTENSION_DOWNLOAD_URL, "/downloads/grove-for-canvas-0.3.0.zip");
   assert.match(`${step.body} ${step.note}`, /required.*latest release.*unzip.*Chrome or Edge/i);
 });
 

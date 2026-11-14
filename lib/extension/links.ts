@@ -1,5 +1,8 @@
-/** Where people get the "Grove for Canvas" extension. Swap for the Chrome Web Store listing when it exists. */
-export const EXTENSION_DOWNLOAD_URL = "https://github.com/codebyjossaya/canvas-grove/releases/latest";
+/**
+ * Pinned, same-origin extension artifact used for the extension-first authentication trial.
+ * Swap this for the Chrome Web Store listing after the live Canvas proof and store review.
+ */
+export const EXTENSION_DOWNLOAD_URL = "/downloads/grove-for-canvas-0.3.0.zip";
 /** In-app install detection, instructions and browser pairing screen. */
 export const EXTENSION_INSTALL_PATH = "/extension/connect";
 

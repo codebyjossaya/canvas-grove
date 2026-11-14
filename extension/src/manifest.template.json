@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Grove for Canvas",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Connects Canvas Grove through the Canvas session you explicitly approve in your own browser.",
   "icons": { "16": "icons/16.png", "32": "icons/32.png", "48": "icons/48.png", "128": "icons/128.png" },
   "permissions": ["cookies", "storage"],

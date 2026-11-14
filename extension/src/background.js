@@ -110,8 +110,14 @@ async function openCanvasAuthentication(connection, message) {
     catch { granted = false; }
   }
   if (!granted) return { ok: false, reason: "permission-required", canvasOrigin: origin };
-  await chrome.storage.local.set({ pendingCanvasAuth: { sessionId, canvasOrigin: origin, startedAt: Date.now() } });
-  await chrome.tabs.create({ url: loginUrl.toString() });
+  let authWindow;
+  try {
+    authWindow = await chrome.windows.create({ url: loginUrl.toString(), type: "popup", focused: true, width: 720, height: 840 });
+  } catch { return { ok: false, reason: "popup-failed", canvasOrigin: origin }; }
+  await chrome.storage.local.set({ pendingCanvasAuth: {
+    sessionId, canvasOrigin: origin, startedAt: Date.now(),
+    loginWindowId: Number.isInteger(authWindow?.id) ? authWindow.id : null,
+  } });
   return { ok: true, reason: "opened", canvasOrigin: origin };
 }
 
@@ -139,6 +145,9 @@ async function captureCanvasAuthentication(connection, message) {
   });
   if (revoked) return { ok: false, reason: "revoked" };
   if (!response.ok || !body?.connected) return { ok: false, reason: body?.code ?? "capture-rejected" };
+  if (Number.isInteger(pending.loginWindowId)) {
+    try { await chrome.windows.remove(pending.loginWindowId); } catch { /* already closed by the user */ }
+  }
   await chrome.storage.local.remove("pendingCanvasAuth");
   await saveConnection({ ...connection, canvasOrigin, revoked: false });
   await recordResult({ ok: true, reason: "captured" });

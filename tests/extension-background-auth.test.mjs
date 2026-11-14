@@ -15,9 +15,10 @@ function responseJson(value, status = 200) {
   return new Response(JSON.stringify(value), { status, headers: { "content-type": "application/json" } });
 }
 
-function harness({ access = true } = {}) {
+function harness({ access = true, captureStatus = 200, captureBody = { connected: true } } = {}) {
   const saved = new Map([["connection", { token: TOKEN, deviceName: "Test browser", canvasOrigin: null }]]);
   const opened = [];
+  const closed = [];
   const groveRequests = [];
   const cookies = [
     { name: "canvas_session", value: "session-secret", domain: ".instructure.com", path: "/", session: true, httpOnly: true, secure: true, sameSite: "lax", storeId: "profile-7" },
@@ -45,6 +46,10 @@ function harness({ access = true } = {}) {
       request: async () => permission,
     },
     tabs: { create: async ({ url }) => { opened.push(url); return { id: opened.length, url }; } },
+    windows: {
+      create: async ({ url, type }) => { opened.push(url); assert.equal(type, "popup"); return { id: 71 }; },
+      remove: async (id) => { closed.push(id); },
+    },
     cookies: { getAll: async ({ url }) => { assert.equal(url, `${ORIGIN}/`); return cookies; }, set: async () => ({}) },
     action: { setBadgeText: async () => undefined, setBadgeBackgroundColor: async () => undefined },
   };
@@ -53,7 +58,7 @@ function harness({ access = true } = {}) {
     if (value === `${ORIGIN}/api/v1/users/self`) return responseJson({ id: 42, name: "Ada Student" });
     if (value === `${GROVE_ORIGIN}/api/extension/canvas-auth`) {
       groveRequests.push({ url: value, init });
-      return responseJson({ connected: true });
+      return responseJson(captureBody, captureStatus);
     }
     throw new Error(`Unexpected fetch: ${value}`);
   };
@@ -62,16 +67,17 @@ function harness({ access = true } = {}) {
     const async = (listener ?? backgroundListener)(message, sender, resolve);
     if (!async) reject(new Error("background listener did not keep the response channel open"));
   });
-  return { saved, opened, groveRequests, send, setPermission: (value) => { permission = value; } };
+  return { saved, opened, closed, groveRequests, send, setPermission: (value) => { permission = value; } };
 }
 
-test("extension auth requires explicit capture, scopes cookies, and rejects replay", { concurrency: false }, async () => {
+test("extension auth opens a popup, scopes cookies, closes after confirmation, and rejects replay", { concurrency: false }, async () => {
   const state = harness();
   await import(`../extension/dist/background.js?background-auth-test=${Date.now()}`);
 
   const opened = await state.send({ type: "canvas-auth-open", sessionId: SESSION_ID, canvasOrigin: ORIGIN, loginUrl: `${ORIGIN}/login` });
   assert.deepEqual(opened, { ok: true, reason: "opened", canvasOrigin: ORIGIN });
   assert.deepEqual(state.opened, [`${ORIGIN}/login`]);
+  assert.deepEqual(state.closed, [], "the popup stays open while Canvas sign-in is in progress");
   assert.equal(state.groveRequests.length, 0, "opening and detecting an account must never upload cookies");
 
   const checked = await state.send({ type: "canvas-auth-check", sessionId: SESSION_ID, canvasOrigin: ORIGIN });
@@ -90,10 +96,20 @@ test("extension auth requires explicit capture, scopes cookies, and rejects repl
   assert.ok(body.cookies.every((cookie) => cookie.domain === "school.instructure.com"));
   assert.ok(body.cookies.every((cookie) => !("storeId" in cookie)));
   assert.equal(state.saved.has("pendingCanvasAuth"), false);
+  assert.deepEqual(state.closed, [71], "the Canvas sign-in popup closes only after Grove confirms the session");
 
   const replay = await state.send({ type: "canvas-auth-capture", sessionId: SESSION_ID, canvasOrigin: ORIGIN });
   assert.deepEqual(replay, { ok: false, reason: "auth-mismatch" });
   assert.equal(state.groveRequests.length, 1, "a cleared attempt cannot upload a second jar");
+});
+
+test("extension keeps the Canvas popup open when Grove rejects the captured session", { concurrency: false }, async () => {
+  const state = harness({ captureStatus: 401, captureBody: { code: "CANVAS_SESSION_INVALID" } });
+  await state.send({ type: "canvas-auth-open", sessionId: SESSION_ID, canvasOrigin: ORIGIN, loginUrl: `${ORIGIN}/login` });
+  const result = await state.send({ type: "canvas-auth-capture", sessionId: SESSION_ID, canvasOrigin: ORIGIN });
+  assert.deepEqual(result, { ok: false, reason: "CANVAS_SESSION_INVALID" });
+  assert.deepEqual(state.closed, [], "failed verification must never close the sign-in popup");
+  assert.equal(state.saved.has("pendingCanvasAuth"), true, "the same attempt remains available for retry");
 });
 
 test("extension auth does not create a pending attempt when exact-origin access is denied", { concurrency: false }, async () => {

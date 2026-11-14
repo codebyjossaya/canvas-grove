@@ -19,7 +19,7 @@ import {
 import { parseInstitutionLink } from "@/lib/canvas/institution";
 import { AppLink } from "./app-link";
 
-const CONSENT_VERSION = "2026-11-14.extension-v1";
+const CONSENT_VERSION = "2026-11-14.extension-v2-auto-capture";
 const POLL_MS = 3000;
 // While the secure-browser window is open the user is mid sign-in: poll fast so
 // completion is reflected within about a second. The overall budget is unchanged.
@@ -161,6 +161,7 @@ export function CanvasSessionManager() {
   const schoolSearchRequest = useRef(0);
   const schoolSearchAbort = useRef<AbortController | null>(null);
   const extensionPoll = useRef<number>(undefined);
+  const orientationPrefillApplied = useRef(false);
   const reviewOrigin = (() => {
     try {
       return parseInstitutionLink(signInLink).canvasOrigin;
@@ -229,6 +230,29 @@ export function CanvasSessionManager() {
       if (alive) setExtensionStatus(value.installed && value.paired ? "ready" : value.installed ? "unpaired" : "missing");
     }, () => { if (alive) setExtensionStatus("missing"); });
     return () => { alive = false; };
+  }, []);
+  useEffect(() => {
+    if (orientationPrefillApplied.current) return;
+    orientationPrefillApplied.current = true;
+    const params = new URLSearchParams(window.location.search);
+    const name = params.get("canvasSchoolName")?.trim().slice(0, 120) ?? "";
+    const domain = params.get("canvasSchoolDomain")?.trim().slice(0, 300) ?? "";
+    if (!name || !domain) return;
+    try {
+      const parsed = parseInstitutionLink(domain);
+      setEntryMode("search");
+      setSelectedSchool({ name, domain });
+      setSchoolQuery(name);
+      setInstitutionName(name);
+      setSignInLink(`${parsed.canvasOrigin}/login`);
+      setSignInLinkError("");
+      params.delete("canvasSchoolName");
+      params.delete("canvasSchoolDomain");
+      const query = params.toString();
+      window.history.replaceState(null, "", `${window.location.pathname}${query ? `?${query}` : ""}${window.location.hash}`);
+    } catch {
+      setSignInLinkError("The school selected during orientation has an invalid Canvas address. Search for it again.");
+    }
   }, []);
   useEffect(() => {
     if (!busy) return;
@@ -684,7 +708,8 @@ export function CanvasSessionManager() {
     const messages: Record<string, string> = {
       "not-connected": "Connect the Grove browser extension to your account first.",
       "permission-required": "Open the Grove extension from your browser toolbar, choose Allow access to Canvas, then try again.",
-      "not-signed-in": "Finish signing in to Canvas in the tab that opened.",
+      "not-signed-in": "Finish signing in to Canvas in the popup that opened.",
+      "popup-failed": "Your browser could not open the Canvas sign-in popup. Allow popups for Grove, then try again.",
       "auth-mismatch": "This sign-in attempt changed. Start again from Grove.",
       "auth-expired": "This Canvas sign-in attempt expired. Start a new sign-in from Grove.",
     };
@@ -699,6 +724,7 @@ export function CanvasSessionManager() {
           setDetectedAccount(result.account);
           setPhase("verifying");
           setError(null);
+          await finishExtensionAuth(session);
           return;
         }
       } catch { /* The user may still be on the institution sign-in page. */ }
@@ -852,9 +878,9 @@ export function CanvasSessionManager() {
           {current ? `${label} to Canvas` : "Connect your Canvas account"}
         </h2>
         <p>
-          Sign in through Canvas in this browser. The Grove extension sends only
-          this Canvas site&apos;s session cookies after you confirm the detected
-          account; institution passwords and multi-factor prompts stay local.
+          Sign in through Canvas in this browser. After Canvas recognizes you,
+          the Grove extension sends only this Canvas site&apos;s session cookies to
+          Grove for verification; passwords and multi-factor prompts stay local.
         </p>
         {current && (
           <div className="status-row">
@@ -1060,9 +1086,10 @@ export function CanvasSessionManager() {
                 onChange={(event) => setConsent(event.target.checked)}
               />
               <span>
-                I understand the Grove extension will send this Canvas
-                site&apos;s session cookies to Grove over an encrypted connection
-                after I confirm the account, and I can revoke it at any time.
+                I understand that after Canvas recognizes me, the Grove
+                extension will immediately send this Canvas site&apos;s session
+                cookies to Grove over an encrypted connection for verification,
+                and I can revoke the connection at any time.
               </span>
             </label>
             <button
@@ -1085,9 +1112,10 @@ export function CanvasSessionManager() {
             </span>
             <strong id="viewer-review-title">Sign in on your browser</strong>
             <p>
-              The Grove extension will open <b>{reviewOrigin}</b> in a normal
-              browser tab. Check the address, complete your school&apos;s sign-in,
-              then confirm the Canvas identity Grove detects.
+              The Grove extension will open <b>{reviewOrigin}</b> in a dedicated
+              browser popup. Check the address and complete your school&apos;s
+              sign-in. Keep it open; Grove closes it automatically only after
+              the session is verified.
             </p>
             <ul>
               <li>Your password and MFA stay in your browser</li>
@@ -1198,15 +1226,19 @@ export function CanvasSessionManager() {
               </strong>
               <span>
                 {detectedAccount
-                  ? "Confirm this is the Canvas account you want Grove to sync."
-                  : "Finish your school sign-in in the Canvas tab. Grove will detect it without seeing your password or MFA."}
+                  ? `Connecting ${detectedAccount.name} and verifying the session with Canvas. The popup closes only after confirmation.`
+                  : "Finish your school sign-in in the Canvas popup and keep it open. Grove will detect completion without seeing your password or MFA, then close it automatically after verification."}
               </span>
             </div>
-            {detectedAccount ? <button
+            {detectedAccount ? error ? <button
               className="button primary"
               disabled={busy}
               onClick={() => void finishExtensionAuth(current)}
-            >{busy ? "Connecting…" : `Connect as ${detectedAccount.name}`}</button> : <button
+            >{busy ? "Connecting…" : "Retry Canvas verification"}</button> : <button
+              className="button primary"
+              disabled
+              aria-busy="true"
+            >Connecting {detectedAccount.name}…</button> : <button
               className="button secondary"
               disabled={busy}
               onClick={() => launchExisting(current)}
@@ -1235,7 +1267,7 @@ function PhaseList({ phase }: { phase: Phase }) {
       "takeover",
       "Waiting for you to finish Canvas sign-in",
     ],
-    ["verifying", "Confirming the detected Canvas account"],
+    ["verifying", "Verifying the detected Canvas session"],
     ["connected", "Connected and syncing"],
   ];
   const index = Math.max(

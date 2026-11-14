@@ -32,6 +32,7 @@ export const canPropose = (scopes: readonly string[]) => scopes.includes(WRITE_S
 /** Which auto-mode category covers each staged tool (null = never auto, always approval or immediate). */
 export const TOOL_CATEGORY: Record<string, AutoCategory | null> = {
   submit_assignment: "submit_assignment",
+  submit_assignment_document: null,
   reply_to_discussion: "outward_messages",
   send_message: "outward_messages",
   start_quiz_attempt: "quiz_entry",

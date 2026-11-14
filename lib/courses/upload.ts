@@ -12,7 +12,7 @@ import { CourseUploadError, multipartEnvelope, nextCanvasUploadRedirect, parseCo
 
 type Target = { id: string; name: string; canvas_course_id: string; canvas_account_id: string; canvas_base_url: string };
 type StorageResponse = { status: number; headers: IncomingHttpHeaders; body: Buffer };
-type Source = AsyncIterable<Uint8Array>;
+export type UploadSource = AsyncIterable<Uint8Array>;
 export type CourseUploadReceipt = { uploaded: true; replay: boolean; groveFileId: string; canvasFileId: string; filename: string; displayName: string; contentType: string; size: number; folderId: string | null; downloadPath: string; canvasUrl: string; warnings: string[] };
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -40,7 +40,7 @@ async function targetFor(ctx: AuthContext, courseId: string, folderId: string | 
   return { course, session };
 }
 
-async function* multipartBody(source: Source, meta: CourseUploadMeta, fields: Record<string, string>, boundary: string) {
+async function* multipartBody(source: UploadSource, meta: CourseUploadMeta, fields: Record<string, string>, boundary: string) {
   const envelope = multipartEnvelope(fields, meta, boundary);
   yield envelope.prefix;
   let count = 0;
@@ -53,7 +53,7 @@ async function* multipartBody(source: Source, meta: CourseUploadMeta, fields: Re
   yield envelope.suffix;
 }
 
-function transport(url: URL, method: "GET" | "POST", headers: Record<string, string>, body?: Source): Promise<StorageResponse> {
+function transport(url: URL, method: "GET" | "POST", headers: Record<string, string>, body?: UploadSource): Promise<StorageResponse> {
   return new Promise((resolve, reject) => {
     const request = httpsRequest(url, { method, headers, lookup: publicOnlyLookup, signal: AbortSignal.timeout(120_000) }, (response) => {
       const declared = Number(response.headers["content-length"]);
@@ -79,7 +79,7 @@ function parseStorageFile(response: StorageResponse): Record<string, unknown> {
   throw new CourseUploadError("CANVAS_UPLOAD_UNCONFIRMED", "Canvas returned an unreadable file receipt. Check Canvas before retrying.", 502);
 }
 
-async function uploadStorage(uploadUrl: string, fields: Record<string, string>, source: Source, meta: CourseUploadMeta, canvasOrigin: string) {
+export async function uploadCanvasStorage(uploadUrl: string, fields: Record<string, string>, source: UploadSource, meta: CourseUploadMeta, canvasOrigin: string) {
   let url = validateCanvasUploadUrl(uploadUrl, canvasOrigin);
   const boundary = `GroveUpload_${randomBytes(18).toString("base64url")}`;
   const envelope = multipartEnvelope(fields, meta, boundary);
@@ -92,7 +92,7 @@ async function uploadStorage(uploadUrl: string, fields: Record<string, string>, 
   return parseStorageFile(response);
 }
 
-function handshake(value: unknown): { uploadUrl: string; fields: Record<string, string> } {
+export function parseCanvasUploadHandshake(value: unknown): { uploadUrl: string; fields: Record<string, string> } {
   if (!record(value) || typeof value.upload_url !== "string" || !record(value.upload_params)) throw new CourseUploadError("CANVAS_UPLOAD_HANDSHAKE_INVALID", "Canvas did not return a valid upload destination.", 502);
   const fields: Record<string, string> = {};
   for (const [key, item] of Object.entries(value.upload_params)) {
@@ -131,7 +131,7 @@ function failure(status: number, authRequired: boolean): never {
   throw new CourseUploadError("CANVAS_UPLOAD_FAILED", `Canvas could not start the upload (HTTP ${status}).`, 502);
 }
 
-export async function uploadCourseDocument(ctx: AuthContext, courseId: string, rawMeta: CourseUploadMeta, source: Source, idempotencyKey: string): Promise<CourseUploadReceipt> {
+export async function uploadCourseDocument(ctx: AuthContext, courseId: string, rawMeta: CourseUploadMeta, source: UploadSource, idempotencyKey: string): Promise<CourseUploadReceipt> {
   const meta = parseCourseUploadMeta(rawMeta);
   const { course, session } = await targetFor(ctx, courseId, meta.folderId);
   const operationKey = `course-file:${course.canvas_account_id}:${idempotencyKey}`;
@@ -146,8 +146,8 @@ export async function uploadCourseDocument(ctx: AuthContext, courseId: string, r
   try {
     const initial = await executeCanvasApiForSession(session, ctx.clerkUserId, request);
     if (!initial.ok) failure(initial.status, initial.authRequired);
-    const step = handshake(initial.data);
-    const uploaded = await uploadStorage(step.uploadUrl, step.fields, source, meta, course.canvas_base_url);
+    const step = parseCanvasUploadHandshake(initial.data);
+    const uploaded = await uploadCanvasStorage(step.uploadUrl, step.fields, source, meta, course.canvas_base_url);
     let receipt: CourseUploadReceipt;
     try { receipt = await persist(ctx, course, session, uploaded, meta); }
     catch (error) {

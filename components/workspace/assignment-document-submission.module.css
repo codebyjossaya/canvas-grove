@@ -1,0 +1,8 @@
+.card{border:1px solid var(--border-subtle);border-radius:var(--radius-md);background:var(--surface-raised);padding:20px;display:grid;gap:14px}
+.card h2,.card p{margin:0}.intro,.hint{color:var(--text-muted);font-size:var(--fs-sm)}
+.form{display:grid;gap:14px}.form>label{display:grid;gap:6px;font-weight:600}.form input[type=file]{font-weight:400}
+.preview{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:1px;margin:0;border:1px solid var(--border-subtle);border-radius:var(--radius-md);background:var(--border-subtle);overflow:hidden}
+.preview div{background:var(--surface-subtle);padding:9px 11px;min-width:0}.preview dt{font-size:var(--fs-xs);color:var(--text-muted)}.preview dd{margin:2px 0 0;overflow-wrap:anywhere}
+.confirm{display:flex!important;grid-template-columns:none!important;align-items:flex-start;gap:9px!important;font-weight:400!important}.confirm input{margin-top:3px}
+.actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.warning{color:var(--status-warning);font-size:var(--fs-sm)}.error{color:var(--status-danger)}.success{color:var(--status-success)}
+@media(max-width:767px){.card{padding:14px}.preview{grid-template-columns:1fr}}

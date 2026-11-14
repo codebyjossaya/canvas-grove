@@ -64,3 +64,22 @@ a.itemTitle:focus-visible::after{outline:2px solid var(--focus-ring)}
 .pending{opacity:.55;transition:opacity var(--motion-base) var(--ease-standard) 80ms;pointer-events:none}
 .stepper[aria-busy="true"]{cursor:progress}
 @media (prefers-reduced-motion:reduce){.pending{transition:none}}
+/* Custom (Grove-only) events: dashed outline + "Custom" chip so they never read as Canvas items. */
+.titleRow{display:flex;align-items:flex-end;gap:var(--space-4);min-width:0}
+.newEvent{flex:none}
+.custom{box-shadow:none;outline:1px dashed color-mix(in srgb,var(--c,var(--accent-primary)) 70%,var(--border-strong));outline-offset:-1px;background:color-mix(in srgb,var(--c,var(--accent-primary)) 8%,var(--surface-raised))}
+:root[data-theme="dark"] .custom{background:color-mix(in srgb,var(--c,var(--accent-primary)) 12%,var(--surface-subtle))}
+.custom:hover{box-shadow:none;outline-style:solid}
+button.itemTitle{border:0;padding:0;background:none;text-align:left;cursor:pointer;font:inherit;font-size:var(--fs-sm);font-weight:500}
+button.itemTitle::after{content:"";position:absolute;inset:0;border-radius:inherit}
+button.itemTitle:focus-visible{outline:none}
+button.itemTitle:focus-visible::after{outline:2px solid var(--focus-ring)}
+.customChip{background:var(--accent-soft);color:var(--accent-text)}
+.custom .itemMeta{justify-content:flex-start;flex-wrap:wrap}
+.custom .itemMeta time{margin-left:auto}
+.customList{list-style:none;margin:0 0 4px;padding:0;display:grid;gap:6px}
+.customRow{position:relative;display:grid;gap:4px;padding:8px 12px 8px 14px;border-radius:var(--radius-md);font-size:var(--fs-xs)}
+.customRow::before{content:"";position:absolute;left:0;top:8px;bottom:8px;width:3px;border-radius:0 3px 3px 0;background:var(--c,var(--text-faint))}
+@media (max-width:767px){
+  .titleRow{width:100%;justify-content:space-between;align-items:center}
+}

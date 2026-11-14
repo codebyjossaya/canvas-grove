@@ -3,7 +3,7 @@ import { addDays, dayKey, daySublabel, dayLabel, diffDays, formatKey, iso, ms, w
 import { assignmentHref } from "./assignment-detail-core";
 import { htmlToParagraphs, initials, plainText, safeHttpsUrl } from "./text";
 import type {
-  AnnouncementRow, AssignmentRow, CourseCard, CourseRef, CourseRow, CoursesView, DayGroup, DigestEntry,
+  AnnouncementRow, AssignmentRow, CourseCard, CourseRef, CourseRow, CoursesView, CustomEventItem, CustomEventRow, DayGroup, DigestEntry,
   GradesOverviewCourse, InboxAnnouncement, InboxMessage, InboxThread, InboxView, MessageRow, PaletteIndex, PlannerRow,
   PlannerView, RecentGrade, SidebarCourse, SubmissionRow, TodayView, WorkItem, WorkKind, WorkloadDay, WorkState, WorkspaceRows,
 } from "./types";
@@ -265,23 +265,52 @@ export function participantNames(value: unknown, limit = 3) {
   return names.length > limit ? `${names.slice(0, limit).join(", ")} +${names.length - limit}` : names.join(", ");
 }
 
-export function buildPlanner(rows: WorkspaceRows, now: Date, zone: string, options: { weekStart?: string | null; view?: string | null; weekStartsOn?: number }): PlannerView {
-  const nowIso = now.toISOString(), todayKey = dayKey(nowIso, zone), weekStartsOn = options.weekStartsOn ?? 0;
-  const thisWeek = weekStartKey(todayKey, weekStartsOn);
-  const weekStart = options.weekStart ? weekStartKey(options.weekStart, weekStartsOn) : thisWeek;
+/** The week a planner request shows, shared by the loader (to bound the custom-event query) and the builder. */
+export function plannerWeekStart(now: Date, zone: string, weekStart: string | null | undefined, weekStartsOn = 0) {
+  const todayKey = dayKey(now.toISOString(), zone), thisWeek = weekStartKey(todayKey, weekStartsOn);
+  return { todayKey, thisWeek, weekStart: weekStart ? weekStartKey(weekStart, weekStartsOn) : thisWeek };
+}
+
+/** Day keys a custom event covers in `zone` (all-day: its dates; timed: start day through end day). */
+export function customEventDays(row: CustomEventRow, zone: string): string[] {
+  const first = row.allDay ? row.startDate : dayKey(row.startsAt, zone);
+  const last = row.allDay ? row.endDate : dayKey(row.endsAt, zone);
+  if (!first) return [];
+  const keys = [first];
+  for (let index = 1; last && index <= 31 && keys[keys.length - 1] < last; index++) keys.push(addDays(first, index));
+  return keys;
+}
+
+function customEventItem(row: CustomEventRow, courses: Map<string, CourseRow>): CustomEventItem {
+  const course = row.courseId ? courses.get(row.courseId) : null;
+  return { id: row.id, title: row.title, notes: row.notes, course: course ? courseRef(course) : null, color: row.color, allDay: row.allDay,
+    startsAt: row.allDay ? null : iso(row.startsAt), endsAt: row.allDay ? null : iso(row.endsAt), startDate: row.allDay ? row.startDate : null, endDate: row.allDay ? row.endDate : null };
+}
+
+export function buildPlanner(rows: WorkspaceRows, now: Date, zone: string, options: { weekStart?: string | null; view?: string | null; weekStartsOn?: number; customEvents?: CustomEventRow[] }): PlannerView {
+  const nowIso = now.toISOString();
+  const { todayKey, thisWeek, weekStart } = plannerWeekStart(now, zone, options.weekStart, options.weekStartsOn ?? 0);
   const all = buildWorkItems(rows, now);
   const dated = all.filter(item => item.dueAt), undated = all.filter(item => !item.dueAt && !isDone(item.state)).slice(0, 20);
   const byKey = new Map<string, WorkItem[]>();
   for (const item of dated) { const key = dayKey(item.dueAt, zone); byKey.set(key, [...(byKey.get(key) ?? []), item]); }
+  // The student's own events sit beside Canvas items but in their own list, so they can never be
+  // mistaken for (or counted as) Canvas work: no workload weight, no state, no Canvas link.
+  const courses = courseMap(rows.courses), customByKey = new Map<string, CustomEventItem[]>();
+  const customRows = [...(options.customEvents ?? [])].sort((a, b) => Number(b.allDay) - Number(a.allDay) || (ms(a.startsAt) ?? 0) - (ms(b.startsAt) ?? 0) || a.title.localeCompare(b.title));
+  for (const row of customRows) {
+    const item = customEventItem(row, courses);
+    for (const key of customEventDays(row, zone)) customByKey.set(key, [...(customByKey.get(key) ?? []), item]);
+  }
   const days = Array.from({ length: 7 }, (_, index) => {
     const key = addDays(weekStart, index);
-    return { key, label: dayLabel(key, todayKey), sublabel: daySublabel(key), items: byKey.get(key) ?? [], today: key === todayKey, weekday: formatKey(key, { weekday: "short" }), dayNumber: formatKey(key, { day: "numeric" }) };
+    return { key, label: dayLabel(key, todayKey), sublabel: daySublabel(key), items: byKey.get(key) ?? [], custom: customByKey.get(key) ?? [], today: key === todayKey, weekday: formatKey(key, { weekday: "short" }), dayNumber: formatKey(key, { day: "numeric" }) };
   });
   const agendaStart = weekStart === thisWeek ? todayKey : weekStart;
   const agenda: DayGroup[] = [];
   for (let index = 0; index < 28; index++) {
-    const key = addDays(agendaStart, index), list = byKey.get(key);
-    if (list?.length) agenda.push({ key, label: dayLabel(key, todayKey), sublabel: daySublabel(key), items: list });
+    const key = addDays(agendaStart, index), list = byKey.get(key) ?? [], custom = customByKey.get(key) ?? [];
+    if (list.length || custom.length) agenda.push({ key, label: dayLabel(key, todayKey), sublabel: daySublabel(key), items: list, custom });
   }
   const workload: WorkloadDay[] = Array.from({ length: 14 }, (_, index) => {
     const key = addDays(todayKey, index), open = (byKey.get(key) ?? []).filter(item => !isDone(item.state));
@@ -291,7 +320,8 @@ export function buildPlanner(rows: WorkspaceRows, now: Date, zone: string, optio
   return {
     now: nowIso, zone, view: options.view === "agenda" ? "agenda" : "week", weekStart, weekLabel,
     prevWeek: addDays(weekStart, -7), nextWeek: addDays(weekStart, 7), thisWeek, isCurrentWeek: weekStart === thisWeek,
-    days, agenda, undated, workload, hasAnyData: all.length > 0,
+    days, agenda, undated, workload, hasAnyData: all.length > 0 || customRows.length > 0,
+    courses: rows.courses.map(courseRef),
   };
 }
 

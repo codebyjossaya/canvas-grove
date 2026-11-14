@@ -2,6 +2,7 @@ import {
   bigint,
   boolean,
   check,
+  date,
   foreignKey,
   index,
   integer,
@@ -10,6 +11,7 @@ import {
   pgEnum,
   pgTable,
   primaryKey,
+  smallint,
   text,
   timestamp,
   unique,
@@ -411,6 +413,19 @@ export const notes = pgTable("notes", {
   foreignKey({ columns: [t.ownerId, t.courseId], foreignColumns: [courses.ownerId, courses.id], name: "notes_tenant_course_fk" }).onDelete("cascade"),
   foreignKey({ columns: [t.ownerId, t.assignmentId], foreignColumns: [assignments.ownerId, assignments.id], name: "notes_tenant_assignment_fk" }).onDelete("cascade"),
   index("notes_owner_updated_idx").on(t.ownerId, t.updatedAt),
+]);
+
+/** The student's own calendar events (drizzle/0015). Grove-only: Canvas sync never touches them. */
+export const customEvents = pgTable("custom_events", {
+  id: uuid("id").primaryKey().defaultRandom(), ownerId: uuid("owner_id").notNull().references(() => users.id, { onDelete: "cascade" }), courseId: uuid("course_id"), title: text("title").notNull(), notes: text("notes"),
+  allDay: boolean("all_day").notNull().default(false), startsAt: timestamp("starts_at", { withTimezone: true }), endsAt: timestamp("ends_at", { withTimezone: true }), startDate: date("start_date", { mode: "string" }), endDate: date("end_date", { mode: "string" }),
+  color: smallint("color").notNull().default(0), ...timestamps,
+}, (t) => [
+  // The SQL migration narrows this to SET NULL ("course_id") so owner_id is never cleared.
+  foreignKey({ columns: [t.ownerId, t.courseId], foreignColumns: [courses.ownerId, courses.id], name: "custom_events_tenant_course_fk" }).onDelete("set null"),
+  index("custom_events_owner_starts_idx").on(t.ownerId, t.startsAt).where(sql`not ${t.allDay}`),
+  index("custom_events_owner_dates_idx").on(t.ownerId, t.startDate).where(sql`${t.allDay}`),
+  check("custom_events_color_check", sql`${t.color} between 0 and 7`),
 ]);
 
 export const conversations = pgTable("conversations", {

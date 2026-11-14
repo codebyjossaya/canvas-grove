@@ -1,0 +1,34 @@
+/* Custom event editor: centered dialog on desktop, bottom sheet on phones. Motion comes from .cg-sheet (app/motion.css). */
+.sheet{margin:auto;padding:0;border:0;border-radius:var(--radius-lg);background:var(--surface-raised);color:var(--text-primary);box-shadow:var(--shadow-raised);width:min(480px,calc(100vw - 16px));max-width:none;max-height:calc(100dvh - 16px);overflow:hidden}
+.sheet:not([open]){display:none}
+.sheet::backdrop{background:var(--surface-overlay)}
+.inner{display:flex;flex-direction:column;max-height:calc(100dvh - 16px)}
+.head{display:flex;align-items:center;gap:var(--space-2);padding:var(--space-3) var(--space-3) var(--space-3) var(--space-5);border-bottom:1px solid var(--border-subtle)}
+.head h2{font-size:var(--fs-md);font-weight:650;margin:0}
+.badge{margin-right:auto;background:var(--accent-soft);color:var(--accent-text)}
+.body{overflow-y:auto;overscroll-behavior:contain;padding:var(--space-4) var(--space-5);display:grid;gap:var(--space-4);min-width:0}
+.hint{margin:0;color:var(--text-muted);font-size:var(--fs-xs)}
+.field{display:grid;gap:4px;font-size:var(--fs-xs);font-weight:600;color:var(--text-secondary);min-width:0}
+.field input,.field select,.field textarea{width:100%;min-width:0}
+.field textarea{resize:vertical;min-height:72px}
+.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:var(--space-3)}
+.check{display:inline-flex;align-items:center;gap:8px;font-size:var(--fs-sm);font-weight:550;color:var(--text-primary);justify-self:start}
+.colors{display:flex;flex-wrap:wrap;gap:8px;margin:0;padding:0;border:0;min-width:0}
+.colors legend{width:100%;margin-bottom:6px;padding:0;font-size:var(--fs-xs);font-weight:600;color:var(--text-secondary)}
+.colors label{position:relative;display:grid;place-items:center;width:28px;height:28px;border-radius:999px;background:var(--c);cursor:pointer;box-shadow:0 0 0 1px var(--border-subtle)}
+.colors input{position:absolute;inset:0;margin:0;opacity:0;cursor:pointer}
+.colors label:has(input:checked){box-shadow:0 0 0 2px var(--surface-raised),0 0 0 4px var(--c)}
+.colors label:has(input:focus-visible){outline:2px solid var(--focus-ring);outline-offset:3px}
+.error{margin:0;color:var(--status-danger);font-size:var(--fs-sm)}
+.foot{display:flex;align-items:center;gap:var(--space-2);padding:var(--space-3) var(--space-5);border-top:1px solid var(--border-subtle);background:var(--surface-raised)}
+.spacer{flex:1}
+.delete{color:var(--status-danger)}
+.delete:hover:not(:disabled){color:var(--status-danger);background:var(--status-danger-soft)}
+@media (max-width:767px){
+  .sheet{width:100vw;max-height:calc(100dvh - 24px);margin:auto 0 0;border-radius:var(--radius-lg) var(--radius-lg) 0 0}
+  .inner{max-height:calc(100dvh - 24px)}
+  .head{padding-left:var(--space-4)}
+  .body{padding:var(--space-4)}
+  .foot{padding:var(--space-3) var(--space-4) calc(var(--space-3) + env(safe-area-inset-bottom))}
+  .colors label{width:32px;height:32px}
+}

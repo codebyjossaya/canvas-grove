@@ -9,8 +9,9 @@ import {
   coursePages, courses, plannerItems, submissions, userPreferences,
 } from "@/lib/db/schema";
 import { resolveTimeZone } from "@/lib/time";
-import { buildCourses, buildGradesOverview, buildInbox, buildPaletteIndex, buildPlanner, buildSidebarCourses, buildToday, courseRef } from "./build";
-import { firstParam, isValidKey } from "./dates";
+import { listCustomEvents } from "@/lib/custom-events/store";
+import { buildCourses, buildGradesOverview, buildInbox, buildPaletteIndex, buildPlanner, buildSidebarCourses, buildToday, courseRef, plannerWeekStart } from "./build";
+import { addDays, firstParam, isValidKey } from "./dates";
 import { safeHttpsUrl } from "./text";
 import type { AssignmentRow, MessageRow, WorkspaceRows } from "./types";
 
@@ -101,9 +102,16 @@ export async function loadTodayView(ctx: AuthContext) {
 }
 
 export async function loadPlannerView(ctx: AuthContext, params: { week?: string | string[]; view?: string | string[] }) {
-  const [prefs, rows] = await Promise.all([preferences(ctx), workspaceRows(ctx, { announcementsLimit: 0, conversationsLimit: 0 })]);
-  const week = firstParam(params.week);
-  return buildPlanner(rows, new Date(), prefs.zone, { weekStart: isValidKey(week) ? week : null, view: firstParam(params.view), weekStartsOn: prefs.weekStartsOn });
+  const now = new Date(), param = firstParam(params.week), week = isValidKey(param) ? param : null;
+  const rowsPromise = workspaceRows(ctx, { announcementsLimit: 0, conversationsLimit: 0 });
+  const prefs = await preferences(ctx);
+  // The planner shows one week and a 28-day agenda starting no earlier than that week.
+  const { weekStart } = plannerWeekStart(now, prefs.zone, week, prefs.weekStartsOn);
+  const [rows, customEvents] = await Promise.all([
+    rowsPromise,
+    listCustomEvents(ctx.ownerId, new Date(`${addDays(weekStart, -1)}T00:00:00Z`), new Date(`${addDays(weekStart, 37)}T00:00:00Z`)),
+  ]);
+  return buildPlanner(rows, now, prefs.zone, { weekStart: week, view: firstParam(params.view), weekStartsOn: prefs.weekStartsOn, customEvents });
 }
 
 export async function loadInboxView(ctx: AuthContext, params: { tab?: string; c?: string; a?: string }) {

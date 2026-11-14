@@ -31,6 +31,11 @@ export type ConversationRow = {
   messageCount: number; starred: boolean; participants: unknown;
 };
 export type MessageRow = { id: string; conversationId: string; authorName: string | null; bodyHtml: string | null; sentAt: Instant; attachments: unknown };
+/** custom_events row: the student's own event. Timed events use startsAt/endsAt, all-day ones startDate/endDate. */
+export type CustomEventRow = {
+  id: string; courseId: string | null; title: string; notes: string | null; allDay: boolean;
+  startsAt: Instant; endsAt: Instant; startDate: string | null; endDate: string | null; color: number;
+};
 
 /** Everything the workspace views are derived from. */
 export type WorkspaceRows = {
@@ -59,7 +64,14 @@ export type WorkItem = {
   closed?: boolean;
 };
 
-export type DayGroup = { key: string; label: string; sublabel: string; items: WorkItem[] };
+/** A custom (Grove-only) event as the planner shows it. Never a Canvas item: it has no href or state. */
+export type CustomEventItem = {
+  id: string; title: string; notes: string | null; course: CourseRef | null; color: number; allDay: boolean;
+  startsAt: string | null; endsAt: string | null; startDate: string | null; endDate: string | null;
+};
+
+/** `custom` is set only by the planner, which merges the student's own events into its days. */
+export type DayGroup = { key: string; label: string; sublabel: string; items: WorkItem[]; custom?: CustomEventItem[] };
 
 export type DigestEntry =
   | { kind: "announcement"; id: string; title: string; course: CourseRef | null; at: string; href: string }
@@ -83,6 +95,8 @@ export type PlannerView = {
   agenda: DayGroup[]; undated: WorkItem[];
   workload: WorkloadDay[];
   hasAnyData: boolean;
+  /** Courses the event form can link to. */
+  courses: CourseRef[];
 };
 
 export type InboxThread = {

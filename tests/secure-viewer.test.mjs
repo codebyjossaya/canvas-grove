@@ -11,6 +11,7 @@ const relay = read("services/browser-relay/server.mjs");
 const dockerfile = read("services/browser-orchestrator/Dockerfile");
 const html = read("services/browser-orchestrator/viewer/viewer.html");
 const viewer = read("services/browser-orchestrator/viewer/viewer.js");
+const mirrorClient = read("services/browser-orchestrator/viewer/mirror-client.js");
 const startScript = read("browser/browser-image/start-browser.sh");
 const popup = read("components/ui/secure-browser-popup.tsx");
 const confirmRoute = read("app/api/canvas/sessions/[sessionId]/confirm/route.ts");
@@ -32,7 +33,7 @@ test("viewer assets keep path normalization and never serve noVNC's stock UI", (
   assert.match(server, /if \(NOVNC_UI_PAGES\.has\(normalized\)\) return null;/);
   assert.match(server, /readFile\(`\$\{own \? VIEWER_ROOT : NOVNC_ROOT\}\/\$\{normalized\}`\)/);
   assert.doesNotMatch(server, /viewerSignalScript/);
-  assert.match(server, /asset\.name === VIEWER_PAGE \? "no-store, no-transform" : asset\.own \? "private, no-cache" : "private, max-age=3600"/);
+  assert.match(server, /asset\.name === VIEWER_PAGE \? "no-store, no-transform" : asset\.own \? "private, max-age=300" : "private, max-age=3600"/);
   assert.match(server, /"content-security-policy": viewerCsp\(req\.headers\.host\)/);
   assert.match(server, /script-src 'self'; style-src 'self'/);
   assert.match(server, /frame-ancestors 'self'/);
@@ -43,6 +44,9 @@ test("viewer page has no noVNC control-bar markup, no inline script, and fits th
     assert.doesNotMatch(html + viewer, new RegExp(marker));
   }
   assert.match(html, /<script type="module" src="viewer\.js"><\/script>/);
+  assert.match(html, /<template id="mirror-bootstrap"><\/template>/);
+  assert.match(server, /data-initial-renderer=/);
+  assert.match(server, /bootstrapMessages\(\)/);
   assert.doesNotMatch(html, /<script>|<script type="module">|\son[a-z]+=/i, "no inline script or event handler attributes");
   assert.match(html, /<link rel="stylesheet" href="viewer\.css">/);
   assert.match(html, /Connecting to secure browser…/);
@@ -54,6 +58,8 @@ test("viewer page has no noVNC control-bar markup, no inline script, and fits th
   assert.match(viewer, /rfb\.focusOnClick = true;/);
   assert.match(viewer, /rfb\.viewOnly = false;/);
   assert.match(viewer, /\$\{base\}websockify/);
+  assert.match(mirrorClient, /iframe\.src = quirks \? "m\/frame-quirks\.html" : "m\/frame\.html";/, "mirror frames keep their dedicated CSP response so page CSS can apply");
+  assert.doesNotMatch(mirrorClient, /iframe\.srcdoc\s*=/, "srcdoc inherits the viewer CSP, which blocks mirrored inline styles");
 });
 
 test("postMessage contract is unchanged and extended only with signed-in-pending", () => {

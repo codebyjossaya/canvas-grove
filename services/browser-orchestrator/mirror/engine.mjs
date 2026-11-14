@@ -10,7 +10,7 @@
 import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import {
-  clickPoint, detectFallback, frameOrigin, MIRROR_LIMITS, MirrorLimitError, planTextEdit, rewriteCss, safeCanvasData, SECRET_FIELD_PATTERN,
+  clickPoint, clientCssAllowed, detectFallback, frameOrigin, MIRROR_LIMITS, MirrorLimitError, planTextEdit, rewriteCss, safeCanvasData, SECRET_FIELD_PATTERN,
   sanitizeMutation, sanitizeTree, supportsSelection,
 } from "../viewer/mirror-protocol.js";
 
@@ -122,6 +122,7 @@ export class MirrorEngine {
     this.gen = 0;
     this.pixels = false;
     this.viewport = null;
+    this.eagerMirror = false;
     this.reset();
   }
 
@@ -137,12 +138,30 @@ export class MirrorEngine {
     this.fallbackGen = -1;
     this.mainState = "none";
     this.dialog = null;
+    this.lastMainDoc = null;
+    this.warmMessages = [];
+    this.warmMessageBytes = 0;
+    this.warmOverflow = false;
   }
 
-  get wantsMirror() { for (const subscriber of this.subscribers) if (subscriber.mode === "mirror") return true; return false; }
+  get wantsMirror() { if (this.eagerMirror) return true; for (const subscriber of this.subscribers) if (subscriber.mode === "mirror") return true; return false; }
+
+  /** Start the sanitized mirror before a viewer arrives, while the public login page loads. */
+  prewarm() {
+    this.eagerMirror = true;
+    if (!this.cdp && !this.connecting) return this.connect();
+    for (const frame of this.frames.values()) if (this.inActiveTree(frame) && frame.contextId && !frame.started) void this.startFrame(frame);
+    return Promise.resolve();
+  }
+
+  bootstrapMessages() {
+    if (!this.lastMainDoc || this.lastMainDoc.g !== this.gen || this.warmOverflow || this.mainState !== "live") return null;
+    return [{ t: "reset", g: this.gen }, this.lastMainDoc, ...this.warmMessages];
+  }
 
   subscribe(subscriber) {
     this.subscribers.add(subscriber);
+    if (subscriber.mode === "mirror") this.eagerMirror = true;
     if (!this.cdp && !this.connecting) void this.connect();
     else if (subscriber.mode === "mirror") void this.resendAll(subscriber);
     else subscriber.send({ t: "focus", ...this.focusState });
@@ -150,6 +169,20 @@ export class MirrorEngine {
   }
 
   broadcast(message, mode) {
+    if (mode === "mirror" && this.eagerMirror && message?.g === this.gen) {
+      if (message.t === "doc" && message.f === 0) {
+        this.lastMainDoc = message;
+        this.warmMessages = [];
+        this.warmMessageBytes = 0;
+        this.warmOverflow = false;
+      } else if (this.lastMainDoc && !["reset", "loading", "blank"].includes(message.t)) {
+        const bytes = Buffer.byteLength(JSON.stringify(message));
+        if (this.warmMessages.length < 500 && this.warmMessageBytes + bytes <= 2 * 1024 * 1024) {
+          this.warmMessages.push(message);
+          this.warmMessageBytes += bytes;
+        } else this.warmOverflow = true;
+      }
+    }
     for (const subscriber of this.subscribers) if (!mode || subscriber.mode === mode) { try { subscriber.send(message); } catch { /* subscriber gone */ } }
   }
 
@@ -178,7 +211,7 @@ export class MirrorEngine {
     } catch (error) {
       this.log({ event: "mirror_connect_failed", code: String(error?.message || "error").slice(0, 60) });
       this.cdp = null;
-      if (!this.closed && this.subscribers.size) this.reconnectTimer = setTimeout(() => void this.connect(), 2_000);
+      if (!this.closed && (this.subscribers.size || this.eagerMirror)) this.reconnectTimer = setTimeout(() => void this.connect(), 2_000);
       else this.broadcast({ t: "unavailable" });
     } finally { this.connecting = false; }
   }
@@ -263,6 +296,10 @@ export class MirrorEngine {
     for (const [token, item] of this.resourceCache) if (!this.resources.has(token)) { this.resourceCache.delete(token); this.cacheBytes -= item.body.length; }
     this.mainState = "none";
     this.focusState = { editable: false, inputType: "", rect: null };
+    this.lastMainDoc = null;
+    this.warmMessages = [];
+    this.warmMessageBytes = 0;
+    this.warmOverflow = false;
   }
 
   frameKey(frame) {
@@ -300,7 +337,7 @@ export class MirrorEngine {
   async onEvent(method, params, sessionId) {
     if (method === "__closed") {
       this.cdp = null;
-      if (!this.closed && this.subscribers.size) { this.broadcast({ t: "reconnecting" }); this.reconnectTimer = setTimeout(() => void this.connect(), 500); }
+      if (!this.closed && (this.subscribers.size || this.eagerMirror)) { this.broadcast({ t: "reconnecting" }); this.reconnectTimer = setTimeout(() => void this.connect(), 500); }
       return;
     }
     switch (method) {
@@ -472,6 +509,68 @@ export class MirrorEngine {
     };
   }
 
+  /**
+   * Replace external stylesheet links with already-sanitized CSS in the first
+   * document message. During prewarm this work finishes before a viewer opens,
+   * eliminating the CSS request chain from the visible path.
+   */
+  async inlineStyles(root) {
+    const links = [];
+    const walk = (node) => {
+      if (!node || typeof node !== "object") return;
+      if (node.t === 1 && node.n === "link") {
+        const attrs = new Map(Array.isArray(node.a) ? node.a : []);
+        const href = attrs.get("href");
+        if (typeof href === "string" && href.startsWith(`${this.prefix}r/`)) links.push({ node, token: href.slice(`${this.prefix}r/`.length) });
+      }
+      for (const child of Array.isArray(node.c) ? node.c : []) walk(child);
+      for (const child of Array.isArray(node.sr?.c) ? node.sr.c : []) walk(child);
+    };
+    walk(root);
+    if (!links.length) return [];
+    const preloads = new Set();
+    await Promise.all(links.map(async ({ node, token }) => {
+      const item = await Promise.race([
+        this.resource(token).catch(() => null),
+        new Promise((resolve) => setTimeout(() => resolve(null), 1_200)),
+      ]);
+      if (item?.type !== "text/css; charset=utf-8" || !item.body || item.body.length > MIRROR_LIMITS.maxCss) return;
+      const css = item.body.toString("utf8");
+      if (!clientCssAllowed(css)) return;
+      node.css = css;
+      for (const match of css.matchAll(/\/viewer\/[0-9a-f-]{36}\/m\/r\/([A-Za-z0-9_-]{16,64})/g)) {
+        const entry = this.resources.get(match[1]);
+        if (entry && PREFETCH_FONT.test(entry.url)) preloads.add(`${this.prefix}r/${match[1]}`);
+      }
+    }));
+    return [...preloads].slice(0, 16);
+  }
+
+  /** Inline small, magic-byte-validated <img>/<svg image> assets on the warm path. */
+  async inlineMedia(root) {
+    const assets = [];
+    const walk = (node) => {
+      if (!node || typeof node !== "object") return;
+      if (node.t === 1 && (node.n === "img" || node.n === "image")) {
+        for (const pair of Array.isArray(node.a) ? node.a : []) {
+          if (!Array.isArray(pair) || !["src", "href", "xlink:href"].includes(pair[0]) || typeof pair[1] !== "string") continue;
+          if (pair[1].startsWith(`${this.prefix}r/`) && !pair[1].includes("#")) assets.push({ pair, token: pair[1].slice(`${this.prefix}r/`.length) });
+        }
+      }
+      for (const child of Array.isArray(node.c) ? node.c : []) walk(child);
+      for (const child of Array.isArray(node.sr?.c) ? node.sr.c : []) walk(child);
+    };
+    walk(root);
+    await Promise.all(assets.map(async ({ pair, token }) => {
+      const item = await Promise.race([
+        this.resource(token).catch(() => null),
+        new Promise((resolve) => setTimeout(() => resolve(null), 1_200)),
+      ]);
+      if (!item?.body || !String(item.type || "").startsWith("image/") || item.body.length > 256 * 1024) return;
+      pair[1] = `data:${item.type};base64,${item.body.toString("base64")}`;
+    }));
+  }
+
   async onCapture(frame, message, bytes) {
     if (message.t === "hello") { if (this.inActiveTree(frame)) await this.startFrame(frame); return; }
     if (!this.inActiveTree(frame) || !frame.started) return;
@@ -503,8 +602,12 @@ export class MirrorEngine {
         catch (error) { this.fallback(error instanceof MirrorLimitError ? error.reason : "error"); return; }
         if (!root) { this.fallback("error"); return; }
         const adopted = Array.isArray(message.adopted) ? message.adopted.slice(0, 50).map((css) => rewriteCss(String(css), ctx.base, ctx.rewrite)) : [];
+        const preloads = await this.inlineStyles(root);
+        await this.inlineMedia(root);
+        if (gen !== this.gen) return;
         const out = { t: "doc", g: gen, f: key, owner: frame.owner || null, quirks: message.quirks === true, root, adopted,
-          scroll: { x: Number(message.scroll?.x) || 0, y: Number(message.scroll?.y) || 0 }, focus: Number.isInteger(message.focus) ? message.focus : 0 };
+          scroll: { x: Number(message.scroll?.x) || 0, y: Number(message.scroll?.y) || 0 }, focus: Number.isInteger(message.focus) ? message.focus : 0,
+          ...(preloads.length ? { preloads } : {}) };
         if (isMain) this.lastMainDoc = out;
         this.broadcast(out, "mirror");
         if (!isMain && detectFallback({ frames: [frame.url] }) === "captcha") this.fallback("captcha");
@@ -564,6 +667,12 @@ export class MirrorEngine {
     subscriber.send({ t: "reset", g: this.gen });
     if (this.mainState === "blank") { subscriber.send(this.blankMessage()); return; }
     if (this.fallbackGen === this.gen) subscriber.send({ t: "fallback", g: this.gen, reason: "repeat" });
+    if (this.lastMainDoc?.g === this.gen && !this.warmOverflow) {
+      subscriber.send(this.lastMainDoc);
+      for (const message of this.warmMessages) subscriber.send(message);
+      this.log({ event: "mirror_warm_replay", messages: this.warmMessages.length, bytes: this.warmMessageBytes });
+      return;
+    }
     // Re-snapshot every started frame of the active page so the new subscriber gets a full picture.
     for (const frame of this.frames.values()) {
       if (!this.inActiveTree(frame) || !frame.contextId) continue;

@@ -3,7 +3,7 @@
 // the client checks in mirror-protocol.js before it touches the DOM, so a
 // server-side sanitizer bug cannot become script execution here (and the
 // frame's sandbox and CSP would still refuse to run it).
-import { clientAttrAllowed, clientCssAllowed, clientTagAllowed, NAMESPACES, safeCanvasData, svgTagName } from "./mirror-protocol.js";
+import { clientAttrAllowed, clientCssAllowed, clientTagAllowed, isLocalProxyPath, NAMESPACES, safeCanvasData, svgTagName } from "./mirror-protocol.js";
 
 const XLINK_NS = "http://www.w3.org/1999/xlink";
 // Inserted first so every page rule wins the cascade; :where() keeps specificity at zero.
@@ -55,12 +55,15 @@ export class MirrorFrame {
     if (data.t !== 1 || !clientTagAllowed(data.n, data.ns)) return null;
     const ns = data.ns === "svg" ? "svg" : "html";
     const tag = data.n;
+    const inlineStylesheet = ns === "html" && tag === "link" && typeof data.css === "string" && clientCssAllowed(data.css);
     let element;
     if (ns === "svg") element = doc.createElementNS(NAMESPACES.svg, svgTagName(tag));
     else if (tag === "canvas") element = doc.createElement("img"); // bitmap snapshot of a remote canvas
+    else if (inlineStylesheet) element = doc.createElement("style");
     else element = doc.createElement(tag);
-    this.register(element, data.i, { tag, ns });
-    for (const pair of Array.isArray(data.a) ? data.a : []) if (Array.isArray(pair)) this.setAttribute(element, tag, ns, String(pair[0]), String(pair[1]));
+    this.register(element, data.i, { tag: inlineStylesheet ? "style" : tag, ns });
+    if (!inlineStylesheet) for (const pair of Array.isArray(data.a) ? data.a : []) if (Array.isArray(pair)) this.setAttribute(element, tag, ns, String(pair[0]), String(pair[1]));
+    if (inlineStylesheet) { element.textContent = data.css; element.setAttribute("data-cgm-inline", ""); return element; }
     if (data.lk === 1 && (tag === "a" || tag === "area")) {
       // A same-document fragment keeps :link styling; clicks are intercepted
       // and replayed remotely, and the sandbox forbids navigation and popups.
@@ -127,6 +130,12 @@ export class MirrorFrame {
     base.setAttribute("data-cgm-internal", "");
     base.textContent = MIRROR_BASE_CSS;
     head.insertBefore(base, head.firstChild);
+    for (const href of Array.isArray(message.preloads) ? message.preloads.slice(0, 16) : []) {
+      if (!isLocalProxyPath(href)) continue;
+      const preload = doc.createElement("link");
+      preload.rel = "preload"; preload.as = "font"; preload.href = href; preload.crossOrigin = "anonymous";
+      head.insertBefore(preload, base.nextSibling);
+    }
     this.head = head;
     this.adopted = null;
     if (doc.documentElement) doc.replaceChild(html, doc.documentElement); else doc.appendChild(html);

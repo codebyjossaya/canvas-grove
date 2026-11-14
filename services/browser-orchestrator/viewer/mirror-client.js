@@ -9,6 +9,18 @@ import { isTextEntry } from "./mirror-protocol.js";
 
 const INPUT_GRACE_MS = 1_500;
 
+function bootstrapMessages() {
+  const template = document.getElementById("mirror-bootstrap");
+  const encoded = template?.content?.textContent?.trim();
+  template?.remove();
+  if (!encoded) return [];
+  try {
+    const bytes = Uint8Array.from(atob(encoded), (character) => character.charCodeAt(0));
+    const value = JSON.parse(new TextDecoder().decode(bytes));
+    return Array.isArray(value) ? value : [];
+  } catch { return []; }
+}
+
 export function createMirror({ container, onReady, onFallback, onRestore, onBlank, onLoading, onUnavailable, onDialog, onDialogClosed }) {
   let gen = -1, stream = null, stopped = false, visible = true, ready = false, fallbackGen = -1, blankGen = -1;
   let top = null; // { iframe, frame, key: 0 }
@@ -17,6 +29,7 @@ export function createMirror({ container, onReady, onFallback, onRestore, onBlan
   const inputState = new WeakMap();
   const coarse = typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches;
   let lastUserAction = 0, suppressFocus = false, docQueue = Promise.resolve();
+  const bootstrap = bootstrapMessages();
 
   const post = (message) => fetch("m/input", { method: "POST", credentials: "same-origin", cache: "no-store", headers: { "content-type": "application/json" }, body: JSON.stringify(message) })
     .then((response) => response.ok ? response.json() : null).catch(() => null);
@@ -52,8 +65,9 @@ export function createMirror({ container, onReady, onFallback, onRestore, onBlan
     return iframe;
   }
 
-  // Upper bound on holding a page back for its stylesheets and fonts.
-  const STYLE_GATE_MS = 1500;
+  // External CSS is a fallback. On the warm path styles are already in the
+  // document message, so only give preloaded fonts a short chance to settle.
+  const STYLE_GATE_MS = 1200, INLINE_STYLE_GATE_MS = 180;
   function stylesReady(doc, limitMs) {
     const started = performance.now();
     const links = [...doc.querySelectorAll('link[rel~="stylesheet"]')].filter((link) => !link.sheet);
@@ -84,7 +98,7 @@ export function createMirror({ container, onReady, onFallback, onRestore, onBlan
           attach(doc, 0, frame);
           // Keep the previous page (or the spinner) up until this one is styled: no flash of
           // unstyled content and no elements popping in one by one.
-          await stylesReady(doc, STYLE_GATE_MS);
+          await stylesReady(doc, doc.querySelector("style[data-cgm-inline]") ? INLINE_STYLE_GATE_MS : STYLE_GATE_MS);
           if (stopped || message.g !== gen) { iframe.remove(); return resolve(); }
           const previous = top;
           top = { iframe, frame };
@@ -329,6 +343,7 @@ export function createMirror({ container, onReady, onFallback, onRestore, onBlan
     stream = new EventSource("m/stream");
     stream.addEventListener("message", (event) => { try { onMessage(JSON.parse(event.data)); } catch { /* malformed event */ } });
     stream.addEventListener("error", () => { if (!ready) onUnavailable?.(); });
+    for (const message of bootstrap) onMessage(message);
     reportViewport();
   }
   function stop() { stopped = true; stream?.close(); stream = null; resizeObserver?.disconnect(); top?.iframe.remove(); top = null; frames.clear(); }

@@ -124,3 +124,25 @@ test("a cross-origin frame never gets a frame key, so viewer input cannot addres
   assert.ok(![...engine.keyToFrame.values()].includes("F3"));
   for (const f of [1, 2, 3]) assert.deepEqual(await engine.input({ t: "click", g: engine.gen, f, i: 1, ox: 0.5, oy: 0.5 }), { ok: false, code: "STALE" });
 });
+
+test("prewarm caches a sanitized document and replays it immediately to the first viewer", async () => {
+  const { engine, out, main } = setup();
+  engine.subscribers.clear();
+  engine.eagerMirror = true;
+  engine.remoteBytes = async (_frame, url) => url.endsWith("site.css")
+    ? Buffer.from('@font-face{font-family:x;src:url("https://login.ufl.edu/x.woff2")}body{color:#123}')
+    : Buffer.from("wOF2fake-font");
+  const page = doc(IDP, { root: { i: 1, t: 1, n: "html", c: [
+    { i: 2, t: 1, n: "head", c: [{ i: 3, t: 1, n: "link", a: [["rel", "stylesheet"], ["href", "https://login.ufl.edu/site.css"]] }] },
+    { i: 4, t: 1, n: "body", c: [{ i: 5, t: 3, x: "hello" }] },
+  ] } });
+  await engine.onCapture(main, page, 300);
+  assert.ok(engine.lastMainDoc, "the eager mirror retains its sanitized first document");
+  const link = engine.lastMainDoc.root.c[0].c[0];
+  assert.match(link.css, /body\{color:#123\}/, "stylesheet bytes are inlined before replay");
+  assert.equal(engine.lastMainDoc.preloads.length, 1, "a referenced font is preloaded");
+  const replay = [];
+  await engine.resendAll({ mode: "mirror", send: (message) => replay.push(message) });
+  assert.deepEqual(replay.map((message) => message.t), ["reset", "doc"]);
+  assert.equal(out.length, 0, "prewarm never exposes a document without an authorized subscriber");
+});

@@ -537,8 +537,10 @@ async function startMirror() {
 }
 
 async function boot() {
-  let mode = null;
-  try {
+  let mode = ["mirror", "pixels"].includes(root.dataset.initialRenderer)
+    ? { renderer: root.dataset.initialRenderer, focusEvents: root.dataset.initialFocus === "1" }
+    : null;
+  if (!mode) try {
     const response = await fetch("mode", { cache: "no-store", credentials: "same-origin" });
     if (response.ok) mode = await response.json();
   } catch { /* default to pixels */ }

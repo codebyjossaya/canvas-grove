@@ -301,6 +301,9 @@ async function resolvePublicOnly(hostname) {
 async function openInteractivePage(session, target) {
   if (!allowedInteractiveUrl(target, session.canvasOrigin, session.authHostRules)) throw new Error("Interactive navigation is not allowed");
   try {
+    // The destination is known before navigation. Keep the sanitized capture engine
+    // attached so CSS and the first document are ready before a viewer is opened.
+    void prewarmMirror(session);
     await relayRequest("POST", `/v1/sessions/${session.id}/navigate`, { url: target });
   } catch (error) {
     console.warn(JSON.stringify({ event: "browser_navigation_failed", status: Number(error?.status) || 0, code: typeof error?.code === "string" ? error.code : "UPSTREAM_ERROR" }));
@@ -380,6 +383,9 @@ async function createBrowser(canvasOrigin, authHostRules, loginPath, display, de
     await removeSessionNetwork(id);
     throw error;
   }
+  // Attach the mirror while the user is still choosing/opening the institution link.
+  // This is safe for every session: it captures only mirrorable public sign-in pages.
+  void prewarmMirror(session);
   await persistRegistry();
   console.log(JSON.stringify({ event: "browser_claimed", durationMs: Date.now() - startedAt, warm: Boolean(warm), profile: display.mobile ? "mobile" : "desktop" }));
   void replenishWarmPool();
@@ -477,7 +483,7 @@ async function revokeSessionLive(sessionId, reason = "ended") {
 
 // ---- DOM mirror engines: one per browser session while a viewer subscribes.
 const mirrorEngines = new Map();
-const MIRROR_IDLE_MS = 15_000;
+const MIRROR_IDLE_MS = 5 * 60_000;
 function closeMirrorEngine(sessionId) {
   const engine = mirrorEngines.get(sessionId);
   if (!engine) return;
@@ -509,11 +515,12 @@ function mirrorEngine(session) {
 }
 function prewarmMirror(session) {
   const engine = mirrorEngine(session);
-  if (!engine.cdp && !engine.connecting) void engine.connect();
+  const connecting = engine.prewarm();
   if (engine.subscribers.size === 0) {
     clearTimeout(engine.idleTimer);
     engine.idleTimer = setTimeout(() => { if (engine.subscribers.size === 0 && mirrorEngines.get(session.id) === engine) closeMirrorEngine(session.id); }, MIRROR_IDLE_MS);
   }
+  return connecting;
 }
 function subscribeMirror(session, subscriber) {
   const engine = mirrorEngine(session);
@@ -724,15 +731,31 @@ function serveViewerEvents(req, res, session, grantKey) {
   else void tick();
 }
 
-async function serveViewer(req, res, session, upstreamPath) {
+async function serveViewer(req, res, session, upstreamPath, grant) {
   session.lastUsedAt = Date.now();
   const asset = await readViewerAsset(upstreamPath);
   if (!asset) return viewerFailure(res, 404, "Secure viewer asset not found.", "failed");
-  const body = asset.body;
+  let body = asset.body;
+  if (asset.name === VIEWER_PAGE) {
+    let html = body.toString("utf8");
+    const renderer = grant?.renderer === "mirror" ? "mirror" : "pixels";
+    html = html.replace('<html lang="en"', `<html lang="en" data-initial-renderer="${renderer}" data-initial-focus="${grant?.focusEvents === true ? "1" : "0"}"`);
+    if (renderer === "mirror") {
+      const bootstrap = mirrorEngines.get(session.id)?.bootstrapMessages();
+      if (bootstrap) {
+        const json = JSON.stringify(bootstrap);
+        if (Buffer.byteLength(json) <= 4 * 1024 * 1024) {
+          const encoded = Buffer.from(json).toString("base64");
+          html = html.replace('<template id="mirror-bootstrap"></template>', `<template id="mirror-bootstrap">${encoded}</template>`);
+        }
+      }
+    }
+    body = Buffer.from(html, "utf8");
+  }
   const headers = { "content-type": mimeTypes.get(asset.extension) || "application/octet-stream",
     "content-length": body.length, "x-content-type-options": "nosniff",
     // Our own shell must never be served stale after a deploy; noVNC modules are immutable per image.
-    "cache-control": asset.name === VIEWER_PAGE ? "no-store, no-transform" : asset.own ? "private, no-cache" : "private, max-age=3600" };
+    "cache-control": asset.name === VIEWER_PAGE ? "no-store, no-transform" : asset.own ? "private, max-age=300" : "private, max-age=3600" };
   if (asset.name === VIEWER_PAGE) Object.assign(headers, { "content-security-policy": viewerCsp(req.headers.host), "referrer-policy": "no-referrer" });
   res.writeHead(200, headers);
   res.end(body);
@@ -798,7 +821,7 @@ const server = createServer(async (req, res) => {
         return serveMirrorResource(req, res, session, mirrorPath[2]);
       }
       if (viewer[2].startsWith("/m/")) return send(res, 404, { error: "Not found" });
-      return serveViewer(req, res, session, viewer[2]);
+      return serveViewer(req, res, session, viewer[2], grant);
     }
     if (viewer && req.method === "POST" && viewer[2] === "/m/input") {
       const grant = viewerGrants.get(hash(viewerCookie(req) || "")); const session = sessions.get(viewer[1]);

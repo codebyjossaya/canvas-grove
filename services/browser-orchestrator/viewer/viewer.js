@@ -27,9 +27,17 @@ const mac = /Mac|iPhone|iPad|iPod/i.test(navigator.userAgentData?.platform || na
 let lastFrameAt = 0;
 const NativeWebSocket = window.WebSocket;
 if (typeof NativeWebSocket === "function") {
-  window.WebSocket = class TrackedWebSocket extends NativeWebSocket {
-    constructor(...args) { super(...args); this.addEventListener("message", () => { lastFrameAt = Date.now(); }); }
+  // Return a plain native socket, never a subclass: noVNC's Websock.attach()
+  // only looks one prototype deep for send/close/onmessage..., so a subclass
+  // makes every `new RFB()` throw "Raw channel missing property: send".
+  const TrackedWebSocket = function TrackedWebSocket(...args) {
+    const socket = new NativeWebSocket(...args);
+    socket.addEventListener("message", () => { lastFrameAt = Date.now(); });
+    return socket;
   };
+  TrackedWebSocket.prototype = NativeWebSocket.prototype;
+  for (const key of ["CONNECTING", "OPEN", "CLOSING", "CLOSED"]) TrackedWebSocket[key] = NativeWebSocket[key];
+  window.WebSocket = TrackedWebSocket;
 }
 
 let rfb = null;
@@ -74,7 +82,20 @@ function fail(detail) {
 }
 
 send("shell-ready");
-addEventListener("error", () => { if (!connected) fail("A secure viewer module did not load."); }, true);
+// Only our own same-origin scripts are fatal. A proxy/CDN in front of the
+// gateway (Cloudflare injects beacon.min.js) gets its script blocked by the
+// viewer CSP; that error must not abort the viewer before it connects.
+addEventListener("error", (event) => {
+  if (connected) return;
+  const target = event.target;
+  if (target instanceof HTMLScriptElement || target instanceof HTMLLinkElement) {
+    const src = target.src || target.href || "";
+    if (!src.startsWith(`${window.location.origin}/`)) { console.warn(`secure viewer: ignoring a third-party resource that failed to load: ${src.split("?", 1)[0]}`); return; }
+    return fail(`A secure viewer module did not load (${src.slice(window.location.origin.length).split("?", 1)[0]}).`);
+  }
+  if (target === window && event.filename && !event.filename.startsWith(`${window.location.origin}/`)) return;
+  fail("A secure viewer module did not load.");
+}, true);
 addEventListener("unhandledrejection", () => { if (!connected) fail("The secure viewer could not start."); });
 const timeout = setTimeout(() => { if (!connected && !finished) fail("The secure browser did not establish a live connection."); }, CONNECT_TIMEOUT_MS);
 addEventListener("beforeunload", () => { finished = true; clearTimeout(timeout); clearTimeout(landedTimer); clearTimeout(reconnectTimer); events?.close(); });
@@ -453,7 +474,7 @@ function switchToPixels(reason) {
   setSurface("pixels");
   mirror.setVisible(false);
   if (reason && FALLBACK_NOTICES[reason]) showNotice(FALLBACK_NOTICES[reason]);
-  if (!rfb) start().catch(() => fail("The secure viewer could not start."));
+  if (!rfb) start().catch((error) => fail(`The secure viewer could not start (pixel view: ${error?.message || error}).`));
   else { show("connected"); focusRemote(); }
 }
 
@@ -528,4 +549,4 @@ async function boot() {
   return start();
 }
 
-boot().catch(() => fail("The secure viewer could not start."));
+boot().catch((error) => fail(`The secure viewer could not start (${error?.message || error}).`));

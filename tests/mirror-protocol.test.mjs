@@ -48,8 +48,12 @@ test("sanitizer strips handlers, srcdoc, form actions and script URLs", () => {
   assert.deepEqual(sanitizeAttribute("div", "html", "data-x", "javascript:still-just-data", ctx), ["data-x", "javascript:still-just-data"]);
 });
 
-test("SVG: only local fragment references, no script URLs or external url()", () => {
-  assert.equal(sanitizeAttribute("use", "svg", "href", "https://evil.example/sprite.svg#a", ctx), null);
+test("SVG: local fragments, proxied sprite sheets only, no script URLs or external url()", () => {
+  // <use> of an external sprite sheet is proxied under the same host policy as images.
+  assert.equal(sanitizeAttribute("use", "svg", "href", "https://deny.example/sprite.svg#a", ctx), null);
+  assert.match(sanitizeAttribute("use", "svg", "href", "https://evil.example/sprite.svg#a", ctx)[1], /^\/viewer\/[0-9a-f-]{36}\/m\/r\/[A-Za-z0-9_-]+#a$/);
+  assert.equal(sanitizeAttribute("use", "svg", "href", "https://evil.example/sprite.svg", ctx), null, "a sprite reference needs a fragment");
+  assert.equal(sanitizeAttribute("image", "svg", "href", "https://deny.example/a.svg#a", ctx), null);
   assert.equal(sanitizeAttribute("use", "svg", "xlink:href", "javascript:alert(1)", ctx), null);
   assert.deepEqual(sanitizeAttribute("use", "svg", "href", "#icon", ctx), ["href", "#icon"]);
   assert.equal(sanitizeAttribute("rect", "svg", "fill", "url(https://evil.example/x#a)", ctx), null);

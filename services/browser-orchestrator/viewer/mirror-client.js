@@ -23,15 +23,19 @@ export function createMirror({ container, onReady, onFallback, onRestore, onBlan
 
   // ---- viewport: the remote lays out at exactly the mirror's size.
   let viewportTimer = 0, lastViewport = "";
+  // The mirrored CSS evaluates prefers-color-scheme here; the remote must match it.
+  const darkScheme = typeof matchMedia === "function" ? matchMedia("(prefers-color-scheme: dark)") : null;
+  darkScheme?.addEventListener?.("change", () => reportViewport());
   function reportViewport() {
     clearTimeout(viewportTimer);
     viewportTimer = setTimeout(() => {
       const w = Math.round(container.clientWidth), h = Math.round(container.clientHeight);
       if (w < 200 || h < 200 || !visible) return;
-      const key = `${w}x${h}`;
+      const cs = darkScheme?.matches ? "dark" : "light";
+      const key = `${w}x${h}:${cs}`;
       if (key === lastViewport) return;
       lastViewport = key;
-      void post({ t: "viewport", w, h });
+      void post({ t: "viewport", w, h, cs });
     }, 150);
   }
   const resizeObserver = typeof ResizeObserver === "function" ? new ResizeObserver(reportViewport) : null;
@@ -48,6 +52,19 @@ export function createMirror({ container, onReady, onFallback, onRestore, onBlan
     return iframe;
   }
 
+  // Upper bound on holding a page back for its stylesheets and fonts.
+  const STYLE_GATE_MS = 1500;
+  function stylesReady(doc, limitMs) {
+    const started = performance.now();
+    const links = [...doc.querySelectorAll('link[rel~="stylesheet"]')].filter((link) => !link.sheet);
+    const sheets = Promise.all(links.map((link) => new Promise((done) => { link.addEventListener("load", done, { once: true }); link.addEventListener("error", done, { once: true }); })));
+    const fonts = sheets.then(() => { void doc.body?.offsetHeight; return doc.fonts?.ready; });
+    return Promise.race([fonts, new Promise((done) => setTimeout(done, limitMs))]).then(() => {
+      const waited = Math.round(performance.now() - started);
+      if (waited >= limitMs) console.warn(`secure viewer: page shown before its styles finished (${links.length} stylesheet(s), ${waited} ms)`);
+    }).catch(() => undefined);
+  }
+
   function loadTop(message) {
     // Build into a fresh sandboxed document, then swap it in: no flash and no
     // state from the previous page survives.
@@ -55,7 +72,7 @@ export function createMirror({ container, onReady, onFallback, onRestore, onBlan
       if (stopped || message.g !== gen) return resolve();
       const iframe = newTopFrame(message.quirks);
       iframe.style.visibility = "hidden";
-      iframe.addEventListener("load", () => {
+      iframe.addEventListener("load", async () => {
         try {
           if (stopped || message.g !== gen) { iframe.remove(); return resolve(); }
           const doc = iframe.contentDocument;
@@ -65,6 +82,10 @@ export function createMirror({ container, onReady, onFallback, onRestore, onBlan
           frames.set(0, { frame, doc });
           frame.load(message);
           attach(doc, 0, frame);
+          // Keep the previous page (or the spinner) up until this one is styled: no flash of
+          // unstyled content and no elements popping in one by one.
+          await stylesReady(doc, STYLE_GATE_MS);
+          if (stopped || message.g !== gen) { iframe.remove(); return resolve(); }
           const previous = top;
           top = { iframe, frame };
           iframe.style.visibility = "";

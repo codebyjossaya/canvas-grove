@@ -32,7 +32,7 @@ test("viewer assets keep path normalization and never serve noVNC's stock UI", (
   assert.match(server, /if \(NOVNC_UI_PAGES\.has\(normalized\)\) return null;/);
   assert.match(server, /readFile\(`\$\{own \? VIEWER_ROOT : NOVNC_ROOT\}\/\$\{normalized\}`\)/);
   assert.doesNotMatch(server, /viewerSignalScript/);
-  assert.match(server, /asset\.name === VIEWER_PAGE \? "no-store" : asset\.own \? "private, no-cache" : "private, max-age=3600"/);
+  assert.match(server, /asset\.name === VIEWER_PAGE \? "no-store, no-transform" : asset\.own \? "private, no-cache" : "private, max-age=3600"/);
   assert.match(server, /"content-security-policy": viewerCsp\(req\.headers\.host\)/);
   assert.match(server, /script-src 'self'; style-src 'self'/);
   assert.match(server, /frame-ancestors 'self'/);

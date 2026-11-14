@@ -113,7 +113,11 @@ test("viewer grant slides with activity up to a 30-minute hard cap", () => {
 test("viewer reconnects dropped streams and recovers stalled ones without the user", () => {
   assert.match(viewer, /const RECONNECT_DELAYS_MS = \[400, 1500, 4000\];/);
   assert.match(viewer, /if \(everConnected\) scheduleReconnect\(\);/);
-  assert.match(viewer, /window\.WebSocket = class TrackedWebSocket extends NativeWebSocket/);
+  // noVNC's Websock.attach() rejects WebSocket subclasses ("Raw channel missing property: send"),
+  // so the tracker must hand back a native socket.
+  assert.match(viewer, /const socket = new NativeWebSocket\(\.\.\.args\);/);
+  assert.match(viewer, /window\.WebSocket = TrackedWebSocket;/);
+  assert.doesNotMatch(viewer, /extends NativeWebSocket/);
   assert.match(viewer, /const STALL_MS = 5_000;/);
   assert.match(viewer, /lastStallReconnectAt = Date\.now\(\); reconnectNow\(\);/);
   assert.match(viewerHtml, /id="refresh"[^>]*hidden>The secure browser isn't responding\. Tap to refresh\.</);

@@ -15,7 +15,13 @@ import {
 } from "../viewer/mirror-protocol.js";
 
 const CAPTURE_SOURCE = readFileSync(new URL("./capture.js", import.meta.url), "utf8");
-const WORLD = "cgmirror", BINDING = "__cgmEmit";
+// Every engine injects into its OWN isolated world. Worlds outlive the CDP session that
+// created them, so a shared name made a new engine pick up a stale world whose binding
+// belonged to a closed session (its snapshots went nowhere).
+const WORLD_PREFIX = "cgmirror", BINDING = "__cgmEmit";
+// Prefetched as soon as a token is minted: stylesheets (fully), and fonts only when the
+// remote browser already holds them (the ones the page really uses; never a new download).
+const PREFETCH_FONT = /\.(?:woff2?|ttf|otf)(?:[?#]|$)/i;
 const CALL_TIMEOUT_MS = 10_000;
 const VALUE_TYPES = new Set(["date", "datetime-local", "month", "week", "time", "color", "range"]);
 const safeCall = (fn) => { try { return fn(); } catch { return undefined; } };
@@ -108,6 +114,8 @@ export class MirrorEngine {
    */
   constructor({ sessionId, connectUrl, resourceHostAllowed, mirrorable, landed = () => false, display, log = () => undefined }) {
     Object.assign(this, { sessionId, connectUrl, resourceHostAllowed, mirrorable, landed, display: display || {}, log });
+    this.world = `${WORLD_PREFIX}-${randomBytes(6).toString("hex")}`;
+    this.resourceInflight = new Map();
     this.prefix = `/viewer/${sessionId}/m/`;
     this.subscribers = new Set();
     this.closed = false;
@@ -194,7 +202,7 @@ export class MirrorEngine {
       this.send("Page.enable", {}, sessionId), this.send("Runtime.enable", {}, sessionId), this.send("DOM.enable", {}, sessionId).catch(() => undefined),
       this.send("Network.enable", { maxTotalBufferSize: 10_000_000, maxResourceBufferSize: 5_000_000 }, sessionId).catch(() => undefined),
     ]);
-    await this.send("Runtime.addBinding", { name: BINDING, executionContextName: WORLD }, sessionId);
+    await this.send("Runtime.addBinding", { name: BINDING, executionContextName: this.world }, sessionId);
     await this.send("Target.setAutoAttach", { autoAttach: true, waitForDebuggerOnStart: false, flatten: true }, sessionId).catch(() => undefined);
     const { frameTree } = await this.send("Page.getFrameTree", {}, sessionId);
     const walk = (node, parentFrameId) => {
@@ -202,12 +210,12 @@ export class MirrorEngine {
       for (const child of node.childFrames || []) walk(child, node.frame.id);
     };
     walk(frameTree);
-    await this.send("Page.addScriptToEvaluateOnNewDocument", { source: CAPTURE_SOURCE, worldName: WORLD, runImmediately: true }, sessionId);
+    await this.send("Page.addScriptToEvaluateOnNewDocument", { source: CAPTURE_SOURCE, worldName: this.world, runImmediately: true }, sessionId);
     // Older builds ignore runImmediately: create the world explicitly where missing.
     setTimeout(() => {
       for (const frame of this.frames.values()) {
         if (frame.sessionId !== sessionId || frame.contextId) continue;
-        void this.send("Page.createIsolatedWorld", { frameId: frame.frameId, worldName: WORLD, grantUniveralAccess: false }, sessionId)
+        void this.send("Page.createIsolatedWorld", { frameId: frame.frameId, worldName: this.world, grantUniveralAccess: false }, sessionId)
           .then(({ executionContextId }) => this.send("Runtime.evaluate", { expression: CAPTURE_SOURCE, contextId: executionContextId }, sessionId)).catch(() => undefined);
       }
     }, 1_500);
@@ -241,6 +249,7 @@ export class MirrorEngine {
     if (next === this.activeTargetId) return;
     this.activeTargetId = next;
     this.newGeneration();
+    void this.applyViewport();
     for (const frame of this.frames.values()) if (frame.pageSessionId === best?.target.sessionId && frame.contextId) void this.startFrame(frame);
   }
 
@@ -374,7 +383,12 @@ export class MirrorEngine {
       case "Page.javascriptDialogClosed": this.dialog = null; this.broadcast({ t: "jsdialog-closed" }, "mirror"); return;
       case "Runtime.executionContextCreated": {
         const context = params.context;
-        if (context?.name !== WORLD || !context.auxData?.frameId) return;
+        if (typeof context?.name === "string" && context.name !== this.world && context.name.startsWith(WORLD_PREFIX)) {
+          // A previous engine's world: stop its observers and timers, never read from it.
+          void this.send("Runtime.evaluate", { expression: "globalThis.__cgm && (globalThis.__cgm.stop(), 0)", contextId: context.id }, sessionId).catch(() => undefined);
+          return;
+        }
+        if (context?.name !== this.world || !context.auxData?.frameId) return;
         const frame = this.registerFrame(context.auxData.frameId, sessionId, info.pageSessionId, undefined);
         if (frame.sessionId !== sessionId) return;
         frame.contextId = context.id; frame.started = false;
@@ -450,6 +464,10 @@ export class MirrorEngine {
       const token = randomBytes(18).toString("base64url");
       this.resources.set(token, { url: absolute, kind, frameId: frame.frameId, gen, indexKey });
       this.resourceIndex.set(indexKey, token);
+      // Warm the cache before the viewer asks: its request then costs one network round
+      // trip instead of a round trip plus a remote-browser fetch (CSS -> fonts is a chain).
+      if (kind === "css") queueMicrotask(() => { void this.resource(token).catch(() => undefined); });
+      else if (PREFETCH_FONT.test(absolute)) queueMicrotask(() => { void this.resource(token, { cacheOnly: true }).catch(() => undefined); });
       return `${this.prefix}r/${token}`;
     };
   }
@@ -558,14 +576,23 @@ export class MirrorEngine {
   // Subresources: served from the remote browser's own cache, or loaded by the
   // remote browser itself (same egress proxy and policy). Never fetched from here.
 
-  async resource(token) {
+  resource(token, { cacheOnly = false } = {}) {
+    const inflight = this.resourceInflight.get(token);
+    // A real request that meets a cache-only prefetch falls through to a full load on a miss.
+    if (inflight) return cacheOnly ? inflight.promise : inflight.promise.then((item) => item || (inflight.cacheOnly ? this.resource(token) : item));
+    const promise = this.loadResource(token, cacheOnly).finally(() => { if (this.resourceInflight.get(token)?.promise === promise) this.resourceInflight.delete(token); });
+    this.resourceInflight.set(token, { promise, cacheOnly });
+    return promise;
+  }
+
+  async loadResource(token, cacheOnly = false) {
     const entry = this.resources.get(token);
     if (!entry) return null;
     const cached = this.resourceCache.get(token);
     if (cached) return cached;
     const frame = this.frames.get(entry.frameId) || this.pageFrame(this.activeSession());
     if (!frame) return null;
-    let body = await this.remoteBytes(frame, entry.url).catch(() => null);
+    let body = await this.remoteBytes(frame, entry.url, cacheOnly).catch(() => null);
     if (!body) return null;
     if (body.length > MIRROR_LIMITS.maxResourceBytes || this.resourceBytes + body.length > MIRROR_LIMITS.maxResourceBytesPerDocument) return { status: 413 };
     this.resourceBytes += body.length;
@@ -582,11 +609,12 @@ export class MirrorEngine {
     return item;
   }
 
-  async remoteBytes(frame, url) {
+  async remoteBytes(frame, url, cacheOnly = false) {
     try {
       const { content, base64Encoded } = await this.send("Page.getResourceContent", { frameId: frame.frameId, url }, frame.sessionId);
       if (typeof content === "string" && content.length) return Buffer.from(content, base64Encoded ? "base64" : "utf8");
     } catch { /* not in the remote cache: load it through the remote browser */ }
+    if (cacheOnly) return null;
     const { resource } = await this.send("Network.loadNetworkResource", { frameId: frame.frameId, url, options: { disableCache: false, includeCredentials: true } }, frame.sessionId);
     if (!resource?.success || !resource.stream || (resource.httpStatusCode && resource.httpStatusCode >= 400)) {
       if (resource?.stream) await this.send("IO.close", { handle: resource.stream }, frame.sessionId).catch(() => undefined);
@@ -621,6 +649,7 @@ export class MirrorEngine {
   async applyViewport() {
     const session = this.activeSession();
     if (!session) return;
+    if (this.colorScheme) await this.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-color-scheme", value: this.colorScheme }] }, session).catch(() => undefined);
     if (this.pixels || !this.viewport || !this.wantsMirror) { await this.send("Emulation.clearDeviceMetricsOverride", {}, session).catch(() => undefined); return; }
     await this.send("Emulation.setDeviceMetricsOverride", { width: this.viewport.w, height: this.viewport.h, deviceScaleFactor: 0, mobile: this.display.mobile === true }, session).catch(() => undefined);
   }
@@ -635,7 +664,7 @@ export class MirrorEngine {
 
   async input(message) {
     if (!this.cdp) return { ok: false, code: "UNAVAILABLE" };
-    if (message.t === "viewport") { this.viewport = { w: message.w, h: message.h }; await this.applyViewport(); return { ok: true }; }
+    if (message.t === "viewport") { this.viewport = { w: message.w, h: message.h }; if (message.cs) this.colorScheme = message.cs; await this.applyViewport(); return { ok: true }; }
     if (message.t === "renderer") { this.pixels = message.r === "pixels"; await this.applyViewport(); return { ok: true }; }
     const pageSession = this.activeSession();
     if (!pageSession) return { ok: false, code: "UNAVAILABLE" };

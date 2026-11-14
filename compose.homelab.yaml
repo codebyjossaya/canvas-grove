@@ -5,6 +5,11 @@ services:
     environment:
       # MCP/OAuth issuer allow-list (first entry is the default). See lib/mcp/origin.ts.
       GROVE_ALLOWED_HOSTS: canvas.jcamille.dev,canvas-grove.tail8dc4e4.ts.net
+  browser-relay:
+    environment:
+      # canvas.jcamille.dev (Cloudflare tunnel) serves the same viewer as the tailnet
+      # origin; the relay checks the viewer websocket Origin against both.
+      BROWSER_EXTRA_PUBLIC_ORIGINS: https://canvas.jcamille.dev
   lan-gateway:
     ports: !override
       - "127.0.0.1:${LAN_PORT:-3000}:8080"

@@ -250,6 +250,13 @@ export function sanitizeAttribute(tag, ns, rawName, rawValue, ctx, element = {})
     if (isSvg) {
       // <use>/<textPath>/gradients may reference local fragments only; <image> may load a proxied picture.
       if (/^\s*#[A-Za-z0-9_:.-]+\s*$/.test(value)) return [name, value.trim()];
+      // <use href="sprite.svg#id">: the sprite document loads through the proxy (same origin,
+      // served as image/svg+xml under the resource CSP); scripts in it never run.
+      const sprite = tag === "use" && /^\s*([^#\s]+)#([A-Za-z0-9_:.-]+)\s*$/.exec(value);
+      if (sprite) {
+        const absolute = resolveHttpUrl(sprite[1], ctx.base); const local = absolute && ctx.rewrite(absolute, "media");
+        return local ? [name, `${local}#${sprite[2]}`] : null;
+      }
       if (tag === "image") {
         if (safeDataImage(value)) return [name, value];
         const absolute = resolveHttpUrl(value, ctx.base); const local = absolute && ctx.rewrite(absolute, "media");
@@ -420,6 +427,7 @@ export function clientAttrAllowed(tag, ns, name, value) {
     (ns === "svg" ? SVG_ATTRS.has(lower) : HTML_GLOBAL_ATTRS.has(lower) || HTML_ATTRS.has(lower));
   if (!allowed) return false;
   if (lower === "href" || lower === "xlink:href" || lower === "src" || lower === "background") {
+    if (ns === "svg" && String(tag).toLowerCase() === "use") { const sprite = /^([^#]+)#[A-Za-z0-9_:.-]+$/.exec(value); if (sprite && isLocalProxyPath(sprite[1])) return true; }
     return isLocalProxyPath(value) || /^#[A-Za-z0-9_:.-]+$/.test(value) && (ns === "svg") || lower === "src" && safeDataImage(value) || ns === "svg" && safeDataImage(value);
   }
   if (lower === "srcset") return value.split(",").every((part) => { const url = part.trim().split(/\s+/)[0]; return isLocalProxyPath(url) || safeDataImage(url); });
@@ -526,7 +534,8 @@ export function validateInputMessage(value) {
     case "viewport": {
       const w = Number(value.w), h = Number(value.h);
       if (!Number.isInteger(w) || !Number.isInteger(h) || w < 200 || h < 200 || w > 3000 || h > 3000) return null;
-      return { t, w, h };
+      // The viewer's color scheme, so the remote page renders the same media-query branch the mirror shows.
+      return value.cs === "dark" || value.cs === "light" ? { t, w, h, cs: value.cs } : { t, w, h };
     }
     case "renderer": return value.r === "pixels" || value.r === "mirror" ? { t, r: value.r } : null;
     case "jsdialog": return typeof value.accept === "boolean" ? { t, accept: value.accept } : null;

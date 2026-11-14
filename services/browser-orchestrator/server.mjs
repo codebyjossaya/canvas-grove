@@ -6,6 +6,7 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { posix as path } from "node:path";
 import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
+import { brotliCompressSync, gzipSync, constants as zlibConstants } from "node:zlib";
 import { classifyManagedContainer } from "./orphan-policy.mjs";
 import { allowedInteractiveUrl } from "./navigation-policy.mjs";
 import { canvasLanded, egressHostAllowed } from "./navigation-policy.mjs";
@@ -506,6 +507,14 @@ function mirrorEngine(session) {
   mirrorEngines.set(session.id, engine);
   return engine;
 }
+function prewarmMirror(session) {
+  const engine = mirrorEngine(session);
+  if (!engine.cdp && !engine.connecting) void engine.connect();
+  if (engine.subscribers.size === 0) {
+    clearTimeout(engine.idleTimer);
+    engine.idleTimer = setTimeout(() => { if (engine.subscribers.size === 0 && mirrorEngines.get(session.id) === engine) closeMirrorEngine(session.id); }, MIRROR_IDLE_MS);
+  }
+}
 function subscribeMirror(session, subscriber) {
   const engine = mirrorEngine(session);
   const unsubscribe = engine.subscribe(subscriber);
@@ -569,14 +578,26 @@ function serveMirrorStream(req, res, session, grantKey) {
   } });
 }
 
-async function serveMirrorResource(res, session, token) {
+// Text-like mirror resources cross the tunnel compressed (fonts in TTF/OTF, CSS and SVG
+// shrink 50-85%); already-compressed formats (woff/woff2, PNG, JPEG...) go as they are.
+const COMPRESSIBLE = new Set(["text/css; charset=utf-8", "image/svg+xml", "font/ttf", "font/otf"]);
+function encodedBody(req, item) {
+  if (!COMPRESSIBLE.has(item.type) || item.body.length < 1024) return null;
+  const accept = String(req.headers["accept-encoding"] || "");
+  if (/\bbr\b/.test(accept)) { item.br ??= brotliCompressSync(item.body, { params: { [zlibConstants.BROTLI_PARAM_QUALITY]: 5 } }); return { encoding: "br", body: item.br }; }
+  if (/\bgzip\b/.test(accept)) { item.gz ??= gzipSync(item.body, { level: 6 }); return { encoding: "gzip", body: item.gz }; }
+  return null;
+}
+async function serveMirrorResource(req, res, session, token) {
   const engine = mirrorEngines.get(session.id);
   if (!engine || !/^[A-Za-z0-9_-]{16,64}$/.test(token)) { res.writeHead(404, { "cache-control": "no-store" }); return res.end(); }
   const item = await engine.resource(token).catch(() => null);
   if (!item || !item.body) { res.writeHead(item?.status || 404, { "cache-control": "no-store" }); return res.end(); }
-  res.writeHead(200, { "content-type": item.type, "content-length": item.body.length, "cache-control": "private, max-age=300",
+  const encoded = encodedBody(req, item); const body = encoded ? encoded.body : item.body;
+  res.writeHead(200, { "content-type": item.type, "content-length": body.length, "cache-control": "private, max-age=300", vary: "accept-encoding",
+    ...(encoded ? { "content-encoding": encoded.encoding } : {}),
     "x-content-type-options": "nosniff", "content-security-policy": MIRROR_RESOURCE_CSP, "cross-origin-resource-policy": "same-origin", "referrer-policy": "no-referrer" });
-  res.end(item.body);
+  res.end(body);
 }
 
 async function handleMirrorInput(req, res, session) {
@@ -711,7 +732,7 @@ async function serveViewer(req, res, session, upstreamPath) {
   const headers = { "content-type": mimeTypes.get(asset.extension) || "application/octet-stream",
     "content-length": body.length, "x-content-type-options": "nosniff",
     // Our own shell must never be served stale after a deploy; noVNC modules are immutable per image.
-    "cache-control": asset.name === VIEWER_PAGE ? "no-store" : asset.own ? "private, no-cache" : "private, max-age=3600" };
+    "cache-control": asset.name === VIEWER_PAGE ? "no-store, no-transform" : asset.own ? "private, no-cache" : "private, max-age=3600" };
   if (asset.name === VIEWER_PAGE) Object.assign(headers, { "content-security-policy": viewerCsp(req.headers.host), "referrer-policy": "no-referrer" });
   res.writeHead(200, headers);
   res.end(body);
@@ -757,6 +778,8 @@ const server = createServer(async (req, res) => {
       const now = Date.now(), idleMs = sessions.get(entry.sessionId)?.devRecording === true ? VIEWER_MAX_MS : VIEWER_IDLE_MS;
       const hardExpiresAt = Math.min(now + VIEWER_MAX_MS, entry.relayExpiresAt || now + VIEWER_IDLE_MS);
       viewerGrants.set(hash(grant), { sessionId: entry.sessionId, relayToken: entry.relayToken, hardExpiresAt, idleMs, expiresAt: Math.min(hardExpiresAt, now + idleMs), openSockets: 0, renderer, focusEvents });
+      // Connect the page mirror while the viewer shell loads (it subscribes ~0.5-1 s later).
+      if (renderer === "mirror") { const live = sessions.get(entry.sessionId); if (live) prewarmMirror(live); }
       res.writeHead(302, { location: `/viewer/${entry.sessionId}/${VIEWER_PAGE}`, "set-cookie": `browser_view=${grant}; HttpOnly; Secure; SameSite=Strict; Path=/viewer/${entry.sessionId}; Max-Age=${Math.round(VIEWER_MAX_MS / 1000)}`, "cache-control": "no-store" }); return res.end();
     }
     const viewer = /^\/viewer\/([0-9a-f-]+)(\/.*)$/.exec(url.pathname);
@@ -772,7 +795,7 @@ const server = createServer(async (req, res) => {
         session.lastUsedAt = Date.now();
         if (mirrorPath[1] === "frame.html" || mirrorPath[1] === "frame-quirks.html") return serveMirrorFrame(res, mirrorPath[1] === "frame-quirks.html");
         if (mirrorPath[1] === "stream") return serveMirrorStream(req, res, session, hash(viewerCookie(req) || ""));
-        return serveMirrorResource(res, session, mirrorPath[2]);
+        return serveMirrorResource(req, res, session, mirrorPath[2]);
       }
       if (viewer[2].startsWith("/m/")) return send(res, 404, { error: "Not found" });
       return serveViewer(req, res, session, viewer[2]);

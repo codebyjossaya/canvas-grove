@@ -118,6 +118,10 @@ export function CanvasSessionManager() {
   const [checkResult, setCheckResult] = useState("");
   const [clientExpiredSessionId, setClientExpiredSessionId] = useState<string>();
   const [confirmingRestart, setConfirmingRestart] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const sessionHeading = useRef<HTMLHeadingElement>(null);
+  const deleteTrigger = useRef<HTMLButtonElement>(null);
+  const deleteCancel = useRef<HTMLButtonElement>(null);
   const flight = useRef(false);
   const poll = useRef<number>(undefined);
   const started = useRef(0);
@@ -199,6 +203,9 @@ export function CanvasSessionManager() {
     );
     return () => clearInterval(id);
   }, [busy]);
+  useEffect(() => {
+    if (confirmingDelete) deleteCancel.current?.focus();
+  }, [confirmingDelete]);
   useEffect(
     () => () => {
       if (poll.current) clearTimeout(poll.current);
@@ -687,9 +694,11 @@ export function CanvasSessionManager() {
       setSessions([]);
       setClientExpiredSessionId(undefined);
       setConfirmingRestart(false);
+      setConfirmingDelete(false);
       setPopupState("idle");
       setPhase("idle");
       setReviewing(false);
+      window.requestAnimationFrame(() => sessionHeading.current?.focus());
     } catch (value) {
       showError(value);
       await refresh();
@@ -748,7 +757,7 @@ export function CanvasSessionManager() {
     >
       <div>
         <p className="eyebrow">Canvas connection</p>
-        <h2 id="session-title">
+        <h2 id="session-title" ref={sessionHeading} tabIndex={-1}>
           {current ? `${label} to Canvas` : "Connect your Canvas account"}
         </h2>
         <p>
@@ -1042,13 +1051,19 @@ export function CanvasSessionManager() {
                 {checkResult}
               </p>
             )}
-            <button
+            {!confirmingDelete ? <button
+              ref={deleteTrigger}
               disabled={busy}
               className="danger-button"
-              onClick={() => void remove(current)}
+              onClick={() => setConfirmingDelete(true)}
             >
               Disconnect &amp; delete session
-            </button>
+            </button> : <div className="page-actions" role="group" aria-label="Confirm Canvas disconnection">
+              <button disabled={busy} aria-busy={busy} className="danger-button" onClick={() => void remove(current)}>
+                Confirm disconnect &amp; delete
+              </button>
+              <button ref={deleteCancel} disabled={busy} className="button ghost" onClick={() => { setConfirmingDelete(false); window.requestAnimationFrame(() => deleteTrigger.current?.focus()); }}>Keep connection</button>
+            </div>}
           </>
         ) : current && interactiveTimedOut ? (
           <div className="interactive-auth-expired" role="status">

@@ -96,6 +96,7 @@
 .previewStack{display:grid;gap:var(--space-8)}
 .previewHead{padding:var(--space-4);border:1px dashed var(--border-strong);border-radius:var(--radius-lg)}
 @media (prefers-reduced-motion:reduce){.pill,.stackTile,.card{transition:none}}
+@media (pointer:coarse){.pill,.filterChip,.copy,.seg button,.linkButton{min-height:44px}}
 
 /* Auto mode (per connection) */
 .connAuto{flex:1 1 100%;order:3;min-width:0}

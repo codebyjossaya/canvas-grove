@@ -64,6 +64,7 @@ a.itemTitle:focus-visible::after{outline:2px solid var(--focus-ring)}
 .pending{opacity:.55;transition:opacity var(--motion-base) var(--ease-standard) 80ms;pointer-events:none}
 .stepper[aria-busy="true"]{cursor:progress}
 @media (prefers-reduced-motion:reduce){.pending{transition:none}}
+@media (pointer:coarse){.segmented a{min-height:44px}.itemTitle{min-height:24px}}
 /* Custom (Grove-only) events: dashed outline + "Custom" chip so they never read as Canvas items. */
 .titleRow{display:flex;align-items:flex-end;gap:var(--space-4);min-width:0}
 .newEvent{flex:none}

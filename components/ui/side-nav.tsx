@@ -1,7 +1,7 @@
 "use client";
 
 import { usePathname } from "next/navigation";
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { AppLink, stripBase, useNavBase } from "./app-link";
 import { Icon } from "./icons";
 import type { SidebarCourse } from "@/lib/views/types";
@@ -79,26 +79,43 @@ export function TabBar() {
 function ActiveTabs() { return <Tabs active={activeHref(useActive())} />; }
 function Tabs({ active }: { active: string | null }) {
   const [open, setOpen] = useState(false);
+  const moreButton = useRef<HTMLButtonElement>(null);
+  const moreSheet = useRef<HTMLElement>(null);
+  function closeMore(restoreFocus = false) {
+    setOpen(false);
+    if (restoreFocus) window.requestAnimationFrame(() => moreButton.current?.focus());
+  }
   useEffect(() => {
     if (!open) return;
-    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") setOpen(false); };
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const frame = window.requestAnimationFrame(() => moreSheet.current?.querySelector<HTMLElement>("a,button")?.focus());
+    const onKey = (event: globalThis.KeyboardEvent) => { if (event.key === "Escape") { event.preventDefault(); closeMore(true); } };
     document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
+    return () => { window.cancelAnimationFrame(frame); document.body.style.overflow = previousOverflow; document.removeEventListener("keydown", onKey); };
   }, [open]);
+  function trapSheetFocus(event: KeyboardEvent<HTMLElement>) {
+    if (event.key !== "Tab") return;
+    const controls = [...(moreSheet.current?.querySelectorAll<HTMLElement>("a,button") ?? [])];
+    if (!controls.length) return;
+    const first = controls[0], last = controls[controls.length - 1];
+    if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+    else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+  }
   const moreActive = active === "/quizzes" || active === "/settings" || active === "/approvals";
   return <>
     <nav className="tabbar" aria-label="Primary">
       {tabs.map(item => <AppLink key={item.href} href={item.href} aria-current={active === item.href ? "page" : undefined} onClick={() => setOpen(false)}>{active === item.href && <ActiveMarker name="tab-pill" className="tab-pill" />}<Icon name={item.icon} /><span>{item.label}</span></AppLink>)}
-      <button type="button" aria-expanded={open} aria-controls="more-sheet" aria-current={moreActive && !open ? "page" : undefined} onClick={() => setOpen(value => !value)}>{moreActive && <ActiveMarker name="tab-pill" className="tab-pill" />}<Icon name="more" /><span>More</span></button>
+      <button ref={moreButton} type="button" aria-expanded={open} aria-haspopup="true" aria-controls="more-sheet" aria-current={moreActive && !open ? "page" : undefined} onClick={() => setOpen(value => !value)}>{moreActive && <ActiveMarker name="tab-pill" className="tab-pill" />}<Icon name="more" /><span>More</span></button>
     </nav>
     {open && <>
-      <button type="button" className="sheet-scrim" aria-label="Close menu" onClick={() => setOpen(false)} />
-      <div className="more-sheet" id="more-sheet" role="menu" aria-label="More">
-        <AppLink role="menuitem" href="/quizzes" onClick={() => setOpen(false)}><Icon name="quiz" />Quizzes</AppLink>
-        <AppLink role="menuitem" href="/grades" onClick={() => setOpen(false)}><Icon name="grade" />Course grades</AppLink>
-        <AppLink role="menuitem" href="/approvals" onClick={() => setOpen(false)}><Icon name="check" />Approvals<ApprovalsBadge /></AppLink>
-        <AppLink role="menuitem" href="/settings" onClick={() => setOpen(false)}><Icon name="settings" />Settings</AppLink>
-      </div>
+      <button type="button" tabIndex={-1} className="sheet-scrim" aria-label="Close menu" onClick={() => closeMore(true)} />
+      <nav ref={moreSheet} className="more-sheet" id="more-sheet" aria-label="More destinations" onKeyDown={trapSheetFocus}>
+        <AppLink href="/quizzes" onClick={() => closeMore()}><Icon name="quiz" />Quizzes</AppLink>
+        <AppLink href="/grades" onClick={() => closeMore()}><Icon name="grade" />Course grades</AppLink>
+        <AppLink href="/approvals" onClick={() => closeMore()}><Icon name="check" />Approvals<ApprovalsBadge /></AppLink>
+        <AppLink href="/settings" onClick={() => closeMore()}><Icon name="settings" />Settings</AppLink>
+      </nav>
     </>}
   </>;
 }

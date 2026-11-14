@@ -122,8 +122,9 @@ const questions = [
   { id: "qq5", position: 5, type: "essay", questionTextHtml: "<p>In two or three sentences, explain why Patagonia’s “Don’t buy this jacket” campaign strengthened its positioning.</p>", pointsPossible: 2, flagged: false, answer: null },
 ];
 
-export function fixtureFetch(method: string, url: URL, body: Json | null, now: Date): FixtureResponse | null {
+export function fixtureFetch(method: string, url: URL, body: Json | null, now: Date, scenario?: string | null): FixtureResponse | null {
   const path = url.pathname;
+  if (path === "/api/onboarding" && method === "POST") return ok({ completed: true });
   if (path === "/api/preferences/timezone") return ok({ timezone: FIXTURE_ZONE });
   if (path === "/api/canvas/sync/status") {
     if (method === "POST") return { status: 202, body: { queued: true, state: "queued" } };
@@ -163,6 +164,10 @@ export function fixtureFetch(method: string, url: URL, body: Json | null, now: D
     if (match[2] === "attempt/time") return ok({ timing });
     return ok({ submittedAt: now.toISOString(), attempt: 1, confirmationId: "CG-48211-1" });
   }
-  if (path === "/api/canvas/sessions" && method === "GET") return ok({ sessions: [{ id: "session-1", canvasOrigin: FIXTURE_ORIGIN, institutionName: "Example State University", state: "active", updatedAt: minutesAgo(now, 40), interactiveAuthExpiresAt: null }] });
+  if (path === "/api/canvas/institutions/search" && method === "GET") return ok({ results: [{ name: "Example State University", domain: FIXTURE_ORIGIN }, { name: "Example Community College", domain: "https://canvas.example-college.edu" }] });
+  const activeSession = { id: "session-1", canvasOrigin: FIXTURE_ORIGIN, institutionName: "Example State University", state: "active", updatedAt: minutesAgo(now, 40), interactiveAuthExpiresAt: null };
+  if (path === "/api/canvas/sessions" && method === "GET") return ok({ sessions: scenario === "disconnected" ? [] : [activeSession] });
+  if (path === "/api/canvas/sessions/session-1" && method === "GET") return ok({ session: activeSession });
+  if (path === "/api/canvas/sessions/session-1" && method === "DELETE") return ok({ deleted: true });
   return null;
 }

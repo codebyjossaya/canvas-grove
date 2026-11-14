@@ -8,14 +8,14 @@
   /* Damped spring (zeta about .72): about 4% overshoot, settles cleanly. */
   --ease-spring:linear(0,.028,.098,.194,.303,.415,.524,.625,.715,.793,.858,.911,.952,.983,1.006,1.022,1.032,1.037,1.038,1.038,1.035,1.031,1.027,1.023,1.019,1.015,1.011,1.008,1.006,1.004,1.002,1.001,1);
   --ease-out-expo:cubic-bezier(.16,1,.3,1);
-  --vt-exit:120ms;--vt-enter:200ms;--vt-move:380ms;
+  --vt-exit:90ms;--vt-enter:160ms;--vt-move:220ms;
   interpolate-size:allow-keywords;
 }
 
 /* ---- view transitions: shared ---- */
 ::view-transition{pointer-events:none}
 /* The shell (sidebar, top bar) lives in the root snapshot: keep its crossfade brief. */
-::view-transition-group(root){animation-duration:200ms}
+::view-transition-group(root){animation-duration:160ms}
 
 @keyframes vt-fade-out{to{opacity:0}}
 @keyframes vt-fade-in{from{opacity:0}}
@@ -29,10 +29,10 @@
 ::view-transition-new(.page-in){animation:var(--vt-enter) var(--ease-out) both vt-fade-in,var(--vt-enter) var(--ease-out-expo) both vt-rise}
 
 /* Drilling in / backing out: a short directional slide. */
-::view-transition-old(.nav-forward){--vt-offset:-32px;animation:var(--vt-exit) ease-in both vt-fade-out,var(--vt-move) var(--ease-out-expo) both vt-slide-to}
-::view-transition-new(.nav-forward){--vt-offset:48px;animation:var(--vt-enter) var(--ease-out) 60ms both vt-fade-in,var(--vt-move) var(--ease-out-expo) both vt-slide-from}
-::view-transition-old(.nav-back){--vt-offset:32px;animation:var(--vt-exit) ease-in both vt-fade-out,var(--vt-move) var(--ease-out-expo) both vt-slide-to}
-::view-transition-new(.nav-back){--vt-offset:-48px;animation:var(--vt-enter) var(--ease-out) 60ms both vt-fade-in,var(--vt-move) var(--ease-out-expo) both vt-slide-from}
+::view-transition-old(.nav-forward){--vt-offset:-12px;animation:var(--vt-exit) ease-in both vt-fade-out,var(--vt-move) var(--ease-out-expo) both vt-slide-to}
+::view-transition-new(.nav-forward){--vt-offset:18px;animation:var(--vt-enter) var(--ease-out) var(--dur-step) both vt-fade-in,var(--vt-move) var(--ease-out-expo) both vt-slide-from}
+::view-transition-old(.nav-back){--vt-offset:12px;animation:var(--vt-exit) ease-in both vt-fade-out,var(--vt-move) var(--ease-out-expo) both vt-slide-to}
+::view-transition-new(.nav-back){--vt-offset:-18px;animation:var(--vt-enter) var(--ease-out) var(--dur-step) both vt-fade-in,var(--vt-move) var(--ease-out-expo) both vt-slide-from}
 
 /* Skeleton hand-off. */
 /* .cg-skeleton owns the (delayed) skeleton fade-in in CSS; the transition must not fade it twice. */
@@ -40,7 +40,7 @@
 ::view-transition-old(.skeleton-out){animation:120ms var(--ease-standard) both vt-fade-out}
 
 /* Active markers glide between items. */
-::view-transition-group(.marker){animation-duration:var(--vt-move);animation-timing-function:var(--ease-spring)}
+::view-transition-group(.marker){animation-duration:var(--dur-enter);animation-timing-function:var(--ease-out)}
 ::view-transition-old(.marker){display:none}
 ::view-transition-new(.marker){animation:none}
 /* The sidebar pill is drawn above the root snapshot while it moves; blending keeps the labels
@@ -64,13 +64,22 @@
 :root{
   --ease-pop:cubic-bezier(.34,1.56,.64,1);   /* overshoot: press release, thumbs, icon pops */
   --ease-press:cubic-bezier(.4,0,1,1);       /* ease-in: pressing down feels immediate */
-  --dur-press:70ms;--dur-release:240ms;--dur-enter:200ms;--dur-first:160ms;--dur-exit:100ms;--dur-step:20ms;
+  --dur-press:70ms;--dur-release:190ms;--dur-enter:180ms;--dur-first:140ms;--dur-exit:90ms;--dur-step:12ms;
 }
-@keyframes cg-rise{from{opacity:.15;translate:0 6px}}
+@keyframes cg-rise{from{opacity:.4;translate:0 4px}}
 @keyframes cg-pop-in{from{opacity:0;translate:0 -4px;scale:.97}}
 @keyframes cg-spin{to{rotate:360deg}}
 @keyframes cg-ring{from{outline-offset:-2px;outline-color:transparent}}
 @keyframes cg-draw{to{stroke-dashoffset:0}}
+@keyframes cg-orientation-forward{from{opacity:.25;translate:12px 0}}
+@keyframes cg-orientation-backward{from{opacity:.25;translate:-12px 0}}
+@keyframes cg-orientation-orbit{from{opacity:.4;scale:.94;rotate:-4deg}to{opacity:1;scale:1;rotate:0deg}}
+
+/* Orientation is a key moment: direction explains where the next step came from, while the
+   short duration keeps controls immediately reusable. */
+.orientation-step[data-direction="forward"],.orientation-visual[data-direction="forward"] .orientation-note{animation:cg-orientation-forward var(--vt-move) var(--ease-out-expo) backwards}
+.orientation-step[data-direction="backward"],.orientation-visual[data-direction="backward"] .orientation-note{animation:cg-orientation-backward var(--vt-move) var(--ease-out-expo) backwards}
+.orientation-visual .orientation-orbit{animation:cg-orientation-orbit 360ms var(--ease-out-expo) backwards}
 
 /* ---- buttons: layered wash + pointer glow (::before), grown shadow (::after), lift/press on the
    individual transform properties so they compose. Disabled controls never move. ---- */
@@ -114,8 +123,8 @@ a.chip:active,button.chip:active{scale:.94;transition-duration:var(--motion-fast
 
 /* Dense navigation: background fade only, never lift or scale (keyboard moves must feel instant). */
 .side-nav a,.sidebar-link,.sidebar-course,.tabbar a,.tabbar button,.sync-compact,.search-trigger{transition:background-color 90ms var(--ease-standard),color 90ms var(--ease-standard),border-color 90ms var(--ease-standard)}
-.tabbar svg{transition:scale 320ms var(--ease-pop),translate 320ms var(--ease-pop)}
-.tabbar [aria-current="page"] svg{translate:0 -1px;scale:1.06}
+.tabbar svg{transition:scale var(--dur-enter) var(--ease-out),translate var(--dur-enter) var(--ease-out)}
+.tabbar [aria-current="page"] svg{translate:0 -1px;scale:1.03}
 
 /* Theme toggle: sun and moon cross-rotate. Both icons stay rendered; opacity/rotation selects one. */
 :root[data-theme] .theme-icon{display:grid;transition:opacity var(--motion-base) var(--ease-standard),rotate 360ms var(--ease-pop),scale 360ms var(--ease-pop)}
@@ -226,6 +235,7 @@ details:not([class*="moreTabs"])[open]::details-content{opacity:1}
   .button[aria-busy="true"]::after{animation:none!important}
   .theme-icon,.cg-chevron,.cg-arrow,.cg-switch::after{rotate:none!important;scale:none!important}
   .palette,.more-sheet{animation:cg-fade 100ms linear!important}
+  .orientation-step,.orientation-note,.orientation-orbit{animation:none!important;translate:none!important;scale:none!important;rotate:none!important}
   ::view-transition-group(*),::view-transition-old(*),::view-transition-new(*){animation-duration:0s!important;animation-delay:0s!important}
   details::details-content{transition:none!important}
 }

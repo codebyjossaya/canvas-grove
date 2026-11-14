@@ -15,6 +15,7 @@ export function AutoModeRow({ target, api, preview }: { target: AutoTarget; api:
   const now = useNow();
   const id = useId();
   const dialog = useRef<HTMLDialogElement>(null);
+  const reviewButton = useRef<HTMLButtonElement>(null);
   const [setup, setSetup] = useState(preview?.open ?? false);
   const [categories, setCategories] = useState<string[]>(preview?.categories ?? []);
   const [minutes, setMinutes] = useState<DurationMinutes>(60);
@@ -31,6 +32,10 @@ export function AutoModeRow({ target, api, preview }: { target: AutoTarget; api:
     if (confirm && !element.open) element.showModal();
     if (!confirm && element.open) element.close();
   }, [confirm]);
+  function closeConfirmation() {
+    setConfirm(false);
+    window.requestAnimationFrame(() => reviewButton.current?.focus());
+  }
 
   async function run(change: { enabled: boolean; categories: string[]; durationMinutes: DurationMinutes }) {
     setBusy(true); setError("");
@@ -69,12 +74,12 @@ export function AutoModeRow({ target, api, preview }: { target: AutoTarget; api:
       {CATEGORIES.map(category => <label key={category.id} className={styles.checkRow}><input type="checkbox" className="cg-checkbox" checked={categories.includes(category.id)} onChange={() => toggle(category.id)} /><span>{category.label}</span></label>)}
       <label className={styles.autoDuration} htmlFor={`${id}-dur`}>For<select id={`${id}-dur`} value={minutes === null ? "null" : String(minutes)} onChange={event => setMinutes(event.target.value === "null" ? null : (Number(event.target.value) as DurationMinutes))}>{DURATIONS.map(duration => <option key={duration.label} value={duration.minutes === null ? "null" : String(duration.minutes)}>{duration.label}</option>)}</select></label>
       <div className={styles.autoButtons}>
-        <button type="button" className="button primary" disabled={!canEnable(categories)} onClick={() => setConfirm(true)}>Review and turn on</button>
+        <button ref={reviewButton} type="button" className="button primary" disabled={!canEnable(categories)} onClick={() => setConfirm(true)}>Review and turn on</button>
         <button type="button" className="button ghost" onClick={() => { setSetup(false); setCategories([]); }}>Cancel</button>
       </div>
       {error ? <p className={styles.error} role="alert">{error}</p> : null}
     </fieldset>}
-    <dialog ref={dialog} className={`${styles.confirm} cg-pop`} aria-labelledby={`${id}-ct`} onClose={() => setConfirm(false)}>
+    <dialog ref={dialog} className={`${styles.confirm} cg-pop`} aria-labelledby={`${id}-ct`} onCancel={event => { event.preventDefault(); closeConfirmation(); }} onClose={() => setConfirm(false)}>
       <div className={styles.confirmInner}>
         <h3 id={`${id}-ct`} className={styles.sectionTitle}>Turn on auto mode for {target.name}?</h3>
         {(() => { const lines = confirmationLines(target.name, categories, minutes); return <>
@@ -84,7 +89,7 @@ export function AutoModeRow({ target, api, preview }: { target: AutoTarget; api:
         </>; })()}
         <div className={styles.autoButtons}>
           <button type="button" className="button primary" disabled={busy} aria-busy={busy} onClick={() => void run({ enabled: true, categories, durationMinutes: minutes })}>Turn on auto mode</button>
-          <button type="button" className="button secondary" autoFocus onClick={() => setConfirm(false)}>Keep asking me</button>
+          <button type="button" className="button secondary" autoFocus onClick={closeConfirmation}>Keep asking me</button>
         </div>
       </div>
     </dialog>

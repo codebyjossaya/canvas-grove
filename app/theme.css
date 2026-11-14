@@ -140,12 +140,7 @@ html, body { background: var(--surface-page); color: var(--text-primary); }
 .secondary, .favorite-control button { background: var(--surface-raised); color: var(--text-primary); }
 .button:disabled, button:disabled, input:disabled, select:disabled, textarea:disabled { cursor: not-allowed; opacity: .56; }
 
-.orientation-visual { background: var(--surface-subtle); color: var(--text-primary); border-right: 1px solid var(--border-subtle); }
-.orientation-number { color: var(--accent-text); }
-.orientation-visual > p { color: var(--text-secondary); }
-.orientation { background: var(--surface-page); }
-.orientation-rings i { border-color: var(--border-strong); }
-.orientation-rings i:nth-child(3) { background: var(--accent-soft); }
+.orientation-visual { border-right: 1px solid color-mix(in srgb, currentColor 13%, transparent); }
 
 .session-error, .error-notice, .host-notice.offline, .host-notice.capacity, .sync-health.auth-expired, .sync-health.error { background: var(--status-danger-soft); border-color: var(--status-danger-border); }
 .host-notice.starting, .sync-health.stale { background: var(--status-warning-soft); border-color: var(--status-warning-border); }

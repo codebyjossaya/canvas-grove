@@ -203,8 +203,8 @@ export class PostgresHostedSessionStore implements HostedSessionStore {
   async startNewInteractiveAttempt(id: string, clerkUserId: string) {
     const ctx = await this.owner(clerkUserId);
     await withTenantTransaction(ctx.ownerId, async (tx) => {
-      // A repeated click observes the already-created pending attempt. Only a
-      // terminal timeout whose cleanup has completed may rotate the identity.
+      // A repeated click observes the already-created pending attempt. Any
+      // terminal expired attempt may rotate its identity for a local re-login.
       const [current] = await tx.select().from(hostedBrowserSessions).where(and(
         eq(hostedBrowserSessions.ownerId, ctx.ownerId), eq(hostedBrowserSessions.id, id),
       )).limit(1);
@@ -216,7 +216,7 @@ export class PostgresHostedSessionStore implements HostedSessionStore {
         && current.interactiveAttemptDeadlineAt.getTime() > Date.now()
       ) return;
       const legacyMissingRuntime = current.status === "auth_required" && current.failureCode === "BROWSER_SESSION_NOT_FOUND" && !current.interactiveAttemptId;
-      if ((current.status !== "expired" || current.failureCode !== "INTERACTIVE_AUTH_TIMEOUT") && !legacyMissingRuntime) {
+      if (current.status !== "expired" && !legacyMissingRuntime) {
         throw new BridgeError("INVALID_SESSION_STATE", "Only an expired sign-in can be restarted.", 409);
       }
       const now = new Date();

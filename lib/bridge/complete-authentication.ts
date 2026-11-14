@@ -24,6 +24,27 @@ export type AuthCompletionTarget = {
 
 const kinds = Object.keys(syncPolicies) as SyncKind[];
 
+type SessionActivationTarget = Pick<AuthCompletionTarget, "attemptId" | "ownerId" | "hostedSessionId" | "canvasOrigin" | "institutionName">;
+
+async function persistAuthenticationTx(tx: postgres.TransactionSql, target: SessionActivationTarget, canvasUserId: string, encrypted: EncryptedBrowserState) {
+  const accounts = await tx<{ id: string }[]>`insert into canvas_accounts(owner_id,canvas_base_url,institution_name,canvas_user_id,status,updated_at)
+    values(${target.ownerId},${target.canvasOrigin},${target.institutionName},${canvasUserId},'connected',now())
+    on conflict(owner_id,canvas_base_url,canvas_user_id) do update set institution_name=excluded.institution_name,status='connected',updated_at=now() returning id`;
+  const accountId = accounts[0].id;
+  await tx`update hosted_browser_sessions set canvas_account_id=${accountId},canvas_external_account_id=${canvasUserId},status='active',last_auth_check_at=now(),failure_code=null,
+    encrypted_state_ciphertext=${JSON.stringify({ ciphertext: encrypted.ciphertext, authTag: encrypted.authTag, algorithm: encrypted.algorithm })},encrypted_state_nonce=${encrypted.iv},wrapped_data_key=${encrypted.wrappedDataKey},key_version=${Number.parseInt(encrypted.keyId, 10) || 1},updated_at=now()
+    where owner_id=${target.ownerId} and id=${target.hostedSessionId} and interactive_attempt_id=${target.attemptId}`;
+  await tx`update hosted_browser_profiles set canvas_account_id=${accountId},updated_at=now() where owner_id=${target.ownerId} and id=(select profile_id from hosted_browser_sessions where owner_id=${target.ownerId} and id=${target.hostedSessionId})`;
+  for (const kind of kinds) {
+    const policy = syncPolicies[kind];
+    const rows = await tx<{ id: string }[]>`insert into sync_policies(owner_id,canvas_account_id,resource_type,interval_seconds,freshness_seconds,priority,next_run_at,status)
+      values(${target.ownerId},${accountId},${kind},${Math.round(policy.intervalMs / 1000)},${Math.round(policy.staleAfterMs / 1000)},${policy.priority},now(),'active')
+      on conflict(canvas_account_id,resource_type,scope_key) do update set status='active',next_run_at=now(),last_error_at=null,last_error_code=null,updated_at=now() returning id`;
+    await tx`insert into sync_jobs(owner_id,canvas_account_id,policy_id,hosted_session_id,kind,scope,dedupe_key,status,priority,max_attempts,run_after)
+      values(${target.ownerId},${accountId},${rows[0].id},${target.hostedSessionId},${kind},${tx.json({})},${`${accountId}:${kind}`},'queued',${policy.priority},5,now()) on conflict do nothing`;
+  }
+}
+
 /**
  * The hosted browser is login-only. Once completeAuthenticationTx has
  * committed the encrypted cookie jar, every caller that won the race destroys
@@ -46,23 +67,32 @@ export async function completeAuthenticationTx(tx: postgres.TransactionSql, moni
       and m.id=${monitor.monitorId} and m.auth_attempt_id=${monitor.attemptId} and m.status in ('queued','leased')
       and (${tokenHash}::text is null or m.lease_token_hash=${tokenHash}) for update of s,m`;
   if (!locked.length) return false;
-  const accounts = await tx<{ id: string }[]>`insert into canvas_accounts(owner_id,canvas_base_url,institution_name,canvas_user_id,status,updated_at)
-    values(${monitor.ownerId},${monitor.canvasOrigin},${monitor.institutionName},${canvasUserId},'connected',now())
-    on conflict(owner_id,canvas_base_url,canvas_user_id) do update set institution_name=excluded.institution_name,status='connected',updated_at=now() returning id`;
-  const accountId = accounts[0].id;
-  await tx`update hosted_browser_sessions set canvas_account_id=${accountId},canvas_external_account_id=${canvasUserId},status='active',last_auth_check_at=now(),failure_code=null,
-    encrypted_state_ciphertext=${JSON.stringify({ ciphertext: encrypted.ciphertext, authTag: encrypted.authTag, algorithm: encrypted.algorithm })},encrypted_state_nonce=${encrypted.iv},wrapped_data_key=${encrypted.wrappedDataKey},key_version=${Number.parseInt(encrypted.keyId, 10) || 1},updated_at=now()
-    where owner_id=${monitor.ownerId} and id=${monitor.hostedSessionId} and interactive_attempt_id=${monitor.attemptId}`;
-  await tx`update hosted_browser_profiles set canvas_account_id=${accountId},updated_at=now() where owner_id=${monitor.ownerId} and id=(select profile_id from hosted_browser_sessions where owner_id=${monitor.ownerId} and id=${monitor.hostedSessionId})`;
-  for (const kind of kinds) {
-    const policy = syncPolicies[kind];
-    const rows = await tx<{ id: string }[]>`insert into sync_policies(owner_id,canvas_account_id,resource_type,interval_seconds,freshness_seconds,priority,next_run_at,status)
-      values(${monitor.ownerId},${accountId},${kind},${Math.round(policy.intervalMs / 1000)},${Math.round(policy.staleAfterMs / 1000)},${policy.priority},now(),'active')
-      on conflict(canvas_account_id,resource_type,scope_key) do update set status='active',next_run_at=now(),last_error_at=null,last_error_code=null,updated_at=now() returning id`;
-    await tx`insert into sync_jobs(owner_id,canvas_account_id,policy_id,hosted_session_id,kind,scope,dedupe_key,status,priority,max_attempts,run_after)
-      values(${monitor.ownerId},${accountId},${rows[0].id},${monitor.hostedSessionId},${kind},${tx.json({})},${`${accountId}:${kind}`},'queued',${policy.priority},5,now()) on conflict do nothing`;
-  }
+  await persistAuthenticationTx(tx, monitor, canvasUserId, encrypted);
   await tx`update interactive_session_monitors set status='succeeded',lease_owner=null,lease_token_hash=null,lease_expires_at=null,last_observed_state='active',last_error_code=null,finished_at=now(),updated_at=now() where owner_id=${monitor.ownerId} and id=${monitor.monitorId} and auth_attempt_id=${monitor.attemptId}`;
+  return true;
+}
+
+/**
+ * Activate a session captured by the owner's paired browser extension. The extension path has no
+ * remote runtime or monitor lease, so it locks the attempt directly and retires any queued monitor.
+ */
+export async function completeExtensionAuthenticationTx(tx: postgres.TransactionSql, target: SessionActivationTarget, canvasUserId: string, encrypted: EncryptedBrowserState): Promise<boolean> {
+  const locked = await tx<{ id: string }[]>`select id from hosted_browser_sessions
+    where owner_id=${target.ownerId} and id=${target.hostedSessionId} and interactive_attempt_id=${target.attemptId}
+      and status in ('provisioning','auth_required') and revoked_at is null for update`;
+  if (!locked.length) {
+    // A device may retry after Grove committed the jar but the response was lost.
+    // Treat that exact attempt as successful without ever replacing the active jar.
+    const replay = await tx<{ id: string }[]>`select id from hosted_browser_sessions
+      where owner_id=${target.ownerId} and id=${target.hostedSessionId} and interactive_attempt_id=${target.attemptId}
+        and status='active' and revoked_at is null`;
+    return replay.length === 1;
+  }
+  await persistAuthenticationTx(tx, target, canvasUserId, encrypted);
+  await tx`update hosted_browser_sessions set provider_session_ref=${`pending:extension-captured:${target.hostedSessionId}`},provider_secret_ref=null,updated_at=now()
+    where owner_id=${target.ownerId} and id=${target.hostedSessionId}`;
+  await tx`update interactive_session_monitors set status='succeeded',lease_owner=null,lease_token_hash=null,lease_expires_at=null,last_observed_state='active',last_error_code=null,finished_at=now(),updated_at=now()
+    where owner_id=${target.ownerId} and hosted_session_id=${target.hostedSessionId} and auth_attempt_id=${target.attemptId} and status in ('queued','leased')`;
   return true;
 }
 

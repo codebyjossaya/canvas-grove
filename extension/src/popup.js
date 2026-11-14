@@ -14,8 +14,8 @@ function render(state) {
   if (!state || state.state === "disconnected") return show("disconnected");
   if (state.state === "revoked") {
     $("revoked-text").textContent = state.deviceName
-      ? `“${state.deviceName}” was disconnected from Canvas Grove. Connect it again to keep opening Canvas from Grove.`
-      : "This browser was disconnected from Canvas Grove. Connect it again to keep opening Canvas from Grove.";
+      ? `“${state.deviceName}” was disconnected from Canvas Grove. Connect it again to authenticate Canvas from this browser.`
+      : "This browser was disconnected from Canvas Grove. Connect it again to authenticate Canvas from this browser.";
     return show("revoked");
   }
   if (state.state === "offline") return show("offline");
@@ -31,10 +31,10 @@ function render(state) {
   const note = $("note");
   note.hidden = true;
   note.className = "note";
-  if (!state.canvasOrigin) { note.textContent = "Connect Canvas in Canvas Grove first, then reopen this."; note.hidden = false; }
-  else if (state.needsAccess) { note.textContent = `Allow this extension to use ${host} so it can sign you in.`; note.className = "note info"; note.hidden = false; }
-  else if (state.lastIssue && !state.browserSignedIn) { note.textContent = state.lastIssue === "rejected" ? "Canvas did not accept the session Grove sent. Reconnect Canvas in Grove, then Shift-click a Canvas link." : "Could not sign this browser in to Canvas. Reconnect Canvas in Grove, then try again."; note.hidden = false; }
-  else if (state.groveCanvas !== "connected") { note.textContent = "Canvas Grove’s Canvas sign-in has lapsed. Reconnect Canvas in Grove, then try again."; note.hidden = false; }
+  if (!state.canvasOrigin) { note.textContent = "Open Canvas Grove to choose your Canvas site and begin sign-in."; note.hidden = false; }
+  else if (state.needsAccess) { note.textContent = `Allow access only to ${host} so Grove can verify the Canvas account you confirm.`; note.className = "note info"; note.hidden = false; }
+  else if (state.lastIssue && !state.browserSignedIn) { note.textContent = "Canvas did not accept the session in this browser. Open Grove and start Canvas sign-in again."; note.hidden = false; }
+  else if (state.groveCanvas !== "connected") { note.textContent = "Canvas Grove needs a current Canvas session. Open Grove to sign in and confirm the account."; note.hidden = false; }
 
   $("open-canvas").hidden = !!state.needsAccess || !state.canvasOrigin;
   $("grant").hidden = !state.needsAccess;

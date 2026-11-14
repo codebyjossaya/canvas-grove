@@ -12,6 +12,7 @@ export const RATE_LIMITS = {
   sessionCreate: { name: "session-create", limit: 10, windowMs: 10 * 60_000 },
   // The popup retries confirmation for ~10 s after the viewer reports landing.
   authConfirm: { name: "auth-confirm", limit: 40, windowMs: 60_000 },
+  extensionAuth: { name: "extension-auth", limit: 10, windowMs: 10 * 60_000 },
 } as const satisfies Record<string, RateLimitPolicy>;
 
 const MAX_TRACKED_KEYS = 10_000;

@@ -47,6 +47,7 @@ test("outbound-fetching routes check the limit before doing work", () => {
   const sessions = readFileSync(new URL("../app/api/canvas/sessions/route.ts", import.meta.url), "utf8");
   assert.ok(search.indexOf("RATE_LIMITS.institutionSearch") < search.indexOf("searchCanvasInstitutions("));
   const post = sessions.slice(sessions.indexOf("export async function POST"));
-  assert.ok(post.indexOf("RATE_LIMITS.sessionCreate") > 0 && post.indexOf("RATE_LIMITS.sessionCreate") < post.indexOf("discoverInstitutionHosts("));
+  assert.ok(post.indexOf("RATE_LIMITS.sessionCreate") > 0 && post.indexOf("RATE_LIMITS.sessionCreate") < post.indexOf("await body(request)"));
+  assert.doesNotMatch(post, /discoverInstitutionHosts/);
   assert.ok(RATE_LIMITS.sessionCreate.limit >= 3, "must leave room for normal retries");
 });

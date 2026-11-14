@@ -40,3 +40,30 @@ export function toChromeCookie(cookie, canvasOrigin, nowSeconds = Date.now() / 1
 export function hasLiveSession(cookies, nowSeconds = Date.now() / 1000) {
   return cookies.some((c) => SESSION_COOKIE_NAMES.includes(c.name) && (c.session || !c.expirationDate || c.expirationDate > nowSeconds));
 }
+
+/**
+ * chrome.cookies.Cookie -> the narrow cookie shape Grove accepts for server-side Canvas calls.
+ * The domain is deliberately narrowed to the exact Canvas host even when Chrome reports a
+ * parent-domain cookie. Store/profile/partition metadata never leaves the browser.
+ */
+export function toServerCookie(cookie, canvasOrigin, nowSeconds = Date.now() / 1000) {
+  if (!cookie || typeof cookie.name !== "string" || typeof cookie.value !== "string" || !cookie.name) return null;
+  if (cookie.name.length > 256 || cookie.value.length > 16_384) return null;
+  const origin = new URL(canvasOrigin);
+  const domain = String(cookie.domain || "").replace(/^\./, "").toLowerCase();
+  if (!domain || (domain !== origin.hostname && !origin.hostname.endsWith(`.${domain}`))) return null;
+  if (cookie.partitionKey?.topLevelSite && cookie.partitionKey.topLevelSite !== origin.origin) return null;
+  const expirationDate = typeof cookie.expirationDate === "number" ? cookie.expirationDate : -1;
+  if (expirationDate > 0 && expirationDate <= nowSeconds) return null;
+  const sameSite = { strict: "Strict", lax: "Lax", no_restriction: "None", unspecified: "Lax" }[cookie.sameSite] ?? "Lax";
+  return {
+    name: cookie.name,
+    value: cookie.value,
+    domain: origin.hostname,
+    path: typeof cookie.path === "string" && cookie.path.startsWith("/") ? cookie.path : "/",
+    expires: expirationDate,
+    httpOnly: !!cookie.httpOnly,
+    secure: origin.protocol === "https:" ? cookie.secure !== false : false,
+    sameSite,
+  };
+}

@@ -133,7 +133,9 @@ function createHostedSessionStore(): HostedSessionStore {
 
 export const hostedSessionStore = globals.__hostedSessionStore ??= createHostedSessionStore();
 export const hostedBrowserProvider = globals.__hostedBrowserProvider ??= createHostedBrowserProvider();
-export const HOSTED_BROWSER_CONSENT_VERSION = "2026-11-07.v1";
+// Legacy name retained for the existing session table/API contract. New connections are sourced
+// from the owner's paired browser extension; the remote login browser is no longer consented to.
+export const HOSTED_BROWSER_CONSENT_VERSION = "2026-11-14.extension-v1";
 export const INTERACTIVE_SIGN_IN_TTL_MS = 30 * 60 * 1000;
 
 export type HostedExecutionResult = { replay: boolean; ok: boolean; status: number; authRequired: boolean; data?: unknown; error?: string };

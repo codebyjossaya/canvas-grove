@@ -72,7 +72,7 @@ export function ExtensionDevices({ fixture }: { fixture?: ExtensionDeviceFixture
 
   return <section id="extension" className="panel" aria-labelledby="extension-heading">
     <div className={styles.head}>
-      <div><h2 id="extension-heading" ref={heading} tabIndex={-1}>Browser extension</h2><p>Open Canvas links and external tools such as Pearson MyLab, Gradescope and New Quizzes from Grove with your Canvas session already in this browser.</p></div>
+      <div><h2 id="extension-heading" ref={heading} tabIndex={-1}>Browser extension</h2><p>Required for Canvas sign-in. It keeps institution authentication in your own browser and connects only the Canvas session you explicitly confirm.</p></div>
       <div className={styles.headActions} aria-label="Browser extension actions"><AppLink className="button primary" href="/extension/connect">Connect a browser</AppLink><a className="button secondary" href={EXTENSION_DOWNLOAD_URL} target="_blank" rel="noopener noreferrer">Get the extension</a></div>
     </div>
     {error ? <p className={styles.error} role="alert">{error}</p> : null}

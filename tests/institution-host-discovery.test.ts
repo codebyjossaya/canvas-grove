@@ -181,8 +181,8 @@ test("errors, timeouts, bad input, oversize and non-HTML pages degrade without t
   assert.deepEqual(json.loginPaths, []);
 });
 
-test("session creation uses the institution host discovery and never fails on it", async () => {
+test("extension-only session creation does not probe identity-provider hosts", async () => {
   const route = await readFile("app/api/canvas/sessions/route.ts", "utf8");
-  assert.match(route, /discoverInstitutionHosts\(canvasOrigin, loginPath\)\.catch\(/);
-  assert.match(route, /mergeDiscoveredAuthHosts\(configuredRules, discovered\.hosts, canvasOrigin\)/);
+  assert.doesNotMatch(route, /discoverInstitutionHosts|mergeDiscoveredAuthHosts|validatePublicHostname/);
+  assert.match(route, /normalizeAuthHostRules\(\[\], canvasOrigin\)/);
 });

@@ -17,8 +17,9 @@ import {
   secureBrowserPopupFeatures,
 } from "@/lib/popup-window";
 import { parseInstitutionLink } from "@/lib/canvas/institution";
+import { AppLink } from "./app-link";
 
-const CONSENT_VERSION = "2026-11-07.v1";
+const CONSENT_VERSION = "2026-11-14.extension-v1";
 const POLL_MS = 3000;
 // While the secure-browser window is open the user is mid sign-in: poll fast so
 // completion is reflected within about a second. The overall budget is unchanged.
@@ -62,6 +63,31 @@ class ApiError extends Error {
   ) {
     super(message);
   }
+}
+
+type ExtensionAuthResult = {
+  ok?: boolean;
+  reason?: string;
+  installed?: boolean;
+  paired?: boolean;
+  signedIn?: boolean;
+  account?: { id: string; name: string };
+};
+
+function extensionRequest(type: "canvas-auth-state" | "canvas-auth-open" | "canvas-auth-check" | "canvas-auth-capture", payload: Record<string, unknown> = {}, timeoutMs = 6000) {
+  return new Promise<ExtensionAuthResult>((resolve, reject) => {
+    const requestId = crypto.randomUUID();
+    const done = (event: MessageEvent) => {
+      const data = event.data as { source?: string; type?: string; requestId?: string; result?: ExtensionAuthResult };
+      if (event.source !== window || event.origin !== window.location.origin || data?.source !== "grove-extension" || data.type !== "canvas-auth-result" || data.requestId !== requestId) return;
+      cleanup();
+      resolve(data.result ?? { ok: false, reason: "unavailable" });
+    };
+    const timer = window.setTimeout(() => { cleanup(); reject(new ApiError("Install and connect the Grove browser extension before signing in to Canvas.", "EXTENSION_REQUIRED", 409)); }, timeoutMs);
+    const cleanup = () => { window.clearTimeout(timer); window.removeEventListener("message", done); };
+    window.addEventListener("message", done);
+    window.postMessage({ source: "grove-web", type, requestId, ...payload }, window.location.origin);
+  });
 }
 
 async function api<T>(url: string, init?: RequestInit) {
@@ -109,7 +135,6 @@ export function CanvasSessionManager() {
   const [activeSchool, setActiveSchool] = useState(-1);
   const [selectedSchool, setSelectedSchool] = useState<School | null>(null);
   const [institutionName, setInstitutionName] = useState("");
-  const [authDomains, setAuthDomains] = useState("");
   const [consent, setConsent] = useState(false);
   const [reviewing, setReviewing] = useState(false);
   const [phase, setPhase] = useState<Phase>("idle");
@@ -119,6 +144,8 @@ export function CanvasSessionManager() {
   const [clientExpiredSessionId, setClientExpiredSessionId] = useState<string>();
   const [confirmingRestart, setConfirmingRestart] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [detectedAccount, setDetectedAccount] = useState<{ id: string; name: string } | null>(null);
+  const [extensionStatus, setExtensionStatus] = useState<"checking" | "ready" | "missing" | "unpaired">("checking");
   const sessionHeading = useRef<HTMLHeadingElement>(null);
   const deleteTrigger = useRef<HTMLButtonElement>(null);
   const deleteCancel = useRef<HTMLButtonElement>(null);
@@ -133,6 +160,7 @@ export function CanvasSessionManager() {
   const schoolSearchTimer = useRef<number>(undefined);
   const schoolSearchRequest = useRef(0);
   const schoolSearchAbort = useRef<AbortController | null>(null);
+  const extensionPoll = useRef<number>(undefined);
   const reviewOrigin = (() => {
     try {
       return parseInstitutionLink(signInLink).canvasOrigin;
@@ -196,6 +224,13 @@ export function CanvasSessionManager() {
     return () => clearTimeout(id);
   }, [refresh]);
   useEffect(() => {
+    let alive = true;
+    extensionRequest("canvas-auth-state", {}, 1800).then((value) => {
+      if (alive) setExtensionStatus(value.installed && value.paired ? "ready" : value.installed ? "unpaired" : "missing");
+    }, () => { if (alive) setExtensionStatus("missing"); });
+    return () => { alive = false; };
+  }, []);
+  useEffect(() => {
     if (!busy) return;
     const id = setInterval(
       () => setElapsed(Math.floor((Date.now() - started.current) / 1000)),
@@ -212,6 +247,7 @@ export function CanvasSessionManager() {
       if (viewerTimer.current) clearTimeout(viewerTimer.current);
       if (popupWatch.current) clearInterval(popupWatch.current);
       if (schoolSearchTimer.current) clearTimeout(schoolSearchTimer.current);
+      if (extensionPoll.current) clearTimeout(extensionPoll.current);
       schoolSearchAbort.current?.abort();
     },
     [],
@@ -614,11 +650,11 @@ export function CanvasSessionManager() {
   }
   async function createAndLaunch() {
     if (!consent || flight.current) return;
-    const target = openPopup("/secure-browser");
-    if (!target || !begin()) return;
+    if (!begin()) return;
     const op = ++operation.current;
     setReviewing(false);
     setPhase("agent-opening");
+    setDetectedAccount(null);
     try {
       const created = await api<{ session: Session }>("/api/canvas/sessions", {
         method: "POST",
@@ -629,22 +665,75 @@ export function CanvasSessionManager() {
             (entryMode === "search" && selectedSchool
               ? selectedSchool.name.slice(0, 100)
               : ""),
-          authHostRules: authDomains,
           consent: true,
           consentVersion: CONSENT_VERSION,
         }),
       });
       if (op !== operation.current) return;
       setSessions([created.session]);
-      await prepareAttemptAndConnect(created.session, target, op);
+      await openExtensionSignIn(created.session, signInLink);
     } catch (value) {
       if (op === operation.current) {
-        closePopup();
         setPhase("takeover");
         showError(value);
         end();
       }
     }
+  }
+  function extensionFailure(result: ExtensionAuthResult) {
+    const messages: Record<string, string> = {
+      "not-connected": "Connect the Grove browser extension to your account first.",
+      "permission-required": "Open the Grove extension from your browser toolbar, choose Allow access to Canvas, then try again.",
+      "not-signed-in": "Finish signing in to Canvas in the tab that opened.",
+      "auth-mismatch": "This sign-in attempt changed. Start again from Grove.",
+      "auth-expired": "This Canvas sign-in attempt expired. Start a new sign-in from Grove.",
+    };
+    return new ApiError(messages[result.reason ?? ""] ?? "The Grove extension could not complete Canvas sign-in.", result.reason === "not-connected" ? "EXTENSION_REQUIRED" : "EXTENSION_AUTH_FAILED", 409);
+  }
+  function watchExtensionSignIn(session: Session) {
+    if (extensionPoll.current) clearTimeout(extensionPoll.current);
+    const check = async () => {
+      try {
+        const result = await extensionRequest("canvas-auth-check", { sessionId: session.id, canvasOrigin: session.canvasOrigin });
+        if (result.ok && result.signedIn && result.account) {
+          setDetectedAccount(result.account);
+          setPhase("verifying");
+          setError(null);
+          return;
+        }
+      } catch { /* The user may still be on the institution sign-in page. */ }
+      extensionPoll.current = window.setTimeout(check, 2000);
+    };
+    extensionPoll.current = window.setTimeout(check, 1200);
+  }
+  async function openExtensionSignIn(session: Session, value = `${session.canvasOrigin}/login`) {
+    let loginUrl = `${session.canvasOrigin}/login`;
+    try {
+      const parsed = parseInstitutionLink(value);
+      loginUrl = `${parsed.canvasOrigin}${parsed.loginPath}`;
+    } catch { /* The stored exact origin remains the safe fallback. */ }
+    const state = await extensionRequest("canvas-auth-state");
+    if (!state.installed || !state.paired) throw extensionFailure({ ok: false, reason: "not-connected" });
+    const opened = await extensionRequest("canvas-auth-open", { sessionId: session.id, canvasOrigin: session.canvasOrigin, loginUrl }, 10_000);
+    if (!opened.ok) throw extensionFailure(opened);
+    setPhase("takeover");
+    setPopupState("open");
+    end();
+    watchExtensionSignIn(session);
+  }
+  async function finishExtensionAuth(session: Session) {
+    if (!begin()) return;
+    if (extensionPoll.current) clearTimeout(extensionPoll.current);
+    setPhase("verifying");
+    try {
+      const captured = await extensionRequest("canvas-auth-capture", { sessionId: session.id, canvasOrigin: session.canvasOrigin }, 30_000);
+      if (!captured.ok) throw extensionFailure(captured);
+      await refresh();
+      setDetectedAccount(null);
+      setPhase("connected");
+      setPopupState("closed");
+    } catch (value) { showError(value); }
+    finally { end(); }
   }
   function launchExisting(session: Session) {
     if (flight.current) return;
@@ -660,23 +749,25 @@ export function CanvasSessionManager() {
       );
       return;
     }
-    const target = openPopup("/secure-browser");
-    if (!target || !begin()) return;
-    const op = ++operation.current;
+    if (!begin()) return;
+    ++operation.current;
     setPhase("agent-opening");
     setError(null);
     setPopupState("open");
-    void prepareAttemptAndConnect(session, target, op);
+    setDetectedAccount(null);
+    void openExtensionSignIn(session).catch((value) => { showError(value); end(); });
   }
   async function startNewInteractiveAttempt(session: Session) {
     if (flight.current) return;
-    closePopup();
-    const target = openPopup("/secure-browser");
-    if (!target || !begin()) return;
-    const op = ++operation.current;
+    if (!begin()) return;
+    ++operation.current;
     setConfirmingRestart(false);
     setPhase("agent-opening");
-    await prepareAttemptAndConnect(session, target, op, true);
+    try {
+      const value = await api<{ session: Session }>(`/api/canvas/sessions/${session.id}/auth-attempt`, { method: "POST", signal: AbortSignal.timeout(30_000) });
+      setSessions([value.session]);
+      await openExtensionSignIn(value.session);
+    } catch (value) { showError(value); end(); }
   }
   async function remove(session: Session) {
     operation.current += 1;
@@ -761,9 +852,9 @@ export function CanvasSessionManager() {
           {current ? `${label} to Canvas` : "Connect your Canvas account"}
         </h2>
         <p>
-          The secure live browser runs in an isolated container on this service
-          operator&apos;s machine. Only you enter your institution password and
-          approve any multi-factor prompt. The agent never sees either.
+          Sign in through Canvas in this browser. The Grove extension sends only
+          this Canvas site&apos;s session cookies after you confirm the detected
+          account; institution passwords and multi-factor prompts stay local.
         </p>
         {current && (
           <div className="status-row">
@@ -809,6 +900,11 @@ export function CanvasSessionManager() {
       <div className="session-actions">
         {!current && !reviewing ? (
           <form onSubmit={requestReview}>
+            {extensionStatus !== "ready" ? <div className="connection-success" role="status">
+              <strong>{extensionStatus === "checking" ? "Checking the Grove extension…" : extensionStatus === "unpaired" ? "Connect the Grove extension" : "Install the Grove extension"}</strong>
+              <span>Canvas authentication happens in this browser, so the extension is required before continuing.</span>
+              {extensionStatus !== "checking" ? <AppLink className="button secondary" href="/extension/connect">Install or connect extension</AppLink> : null}
+            </div> : <div className="connection-success" role="status"><strong>Browser extension ready</strong><span>Your Canvas sign-in will stay in this browser.</span></div>}
             {entryMode === "search" ? (
               selectedSchool ? (
                 <div className="school-selected">
@@ -819,7 +915,7 @@ export function CanvasSessionManager() {
                   <span className="school-domain">{selectedSchool.domain}</span>
                   <small>
                     If your school offers several ways to sign in, you will
-                    choose yours inside the secure browser.
+                    choose yours on its normal Canvas sign-in page.
                   </small>
                   <button
                     type="button"
@@ -957,24 +1053,6 @@ export function CanvasSessionManager() {
                   : "Filled in from your Canvas address if left blank"
               }
             />
-            <details>
-              <summary>Advanced</summary>
-              <label htmlFor="auth-domains">
-                Additional sign-in domains <small>(optional)</small>
-              </label>
-              <input
-                id="auth-domains"
-                value={authDomains}
-                onChange={(event) => setAuthDomains(event.target.value)}
-                placeholder="login.school.edu, mfa-provider.com"
-              />
-              <small>
-                Sign-in domains are detected automatically from your school. Only
-                add domains your institution uses for sign-in or multi-factor
-                authentication that were missed. They are scoped to this
-                connection.
-              </small>
-            </details>
             <label className="consent">
               <input
                 type="checkbox"
@@ -982,17 +1060,18 @@ export function CanvasSessionManager() {
                 onChange={(event) => setConsent(event.target.checked)}
               />
               <span>
-                I understand this session runs on the operator&apos;s machine
-                and has my Canvas authority until revoked.
+                I understand the Grove extension will send this Canvas
+                site&apos;s session cookies to Grove over an encrypted connection
+                after I confirm the account, and I can revoke it at any time.
               </span>
             </label>
             <button
               disabled={
-                !consent || busy || (entryMode === "search" && !signInLink)
+                extensionStatus !== "ready" || !consent || busy || (entryMode === "search" && !signInLink)
               }
               className="button primary"
             >
-              Review secure browser
+              Review browser sign-in
             </button>
           </form>
         ) : !current && reviewing ? (
@@ -1004,23 +1083,22 @@ export function CanvasSessionManager() {
             <span className="viewer-shield" aria-hidden="true">
               ✓
             </span>
-            <strong id="viewer-review-title">You control the sign-in</strong>
+            <strong id="viewer-review-title">Sign in on your browser</strong>
             <p>
-              A dedicated secure browser window will open for{" "}
-              <b>{reviewOrigin}</b>.
-              Check this Canvas address before entering institution credentials.
-              Canvas Grove cannot read your password or multi-factor approval.
+              The Grove extension will open <b>{reviewOrigin}</b> in a normal
+              browser tab. Check the address, complete your school&apos;s sign-in,
+              then confirm the Canvas identity Grove detects.
             </p>
             <ul>
-              <li>Temporary, encrypted live view</li>
-              <li>Sign-in domains limited to this institution</li>
-              <li>Cancel and revoke access at any time</li>
+              <li>Your password and MFA stay in your browser</li>
+              <li>Only cookies for this exact Canvas host are transferred</li>
+              <li>The server re-verifies the session before saving it encrypted</li>
             </ul>
             <button
               className="button primary large"
               onClick={() => void createAndLaunch()}
             >
-              Open secure live browser
+              Open Canvas sign-in
             </button>
             <button
               className="button secondary"
@@ -1029,8 +1107,7 @@ export function CanvasSessionManager() {
               Back
             </button>
             <small>
-              If the window does not appear, allow popups for Canvas Grove and
-              retry.
+              The Grove extension must be installed and connected to this account.
             </small>
           </div>
         ) : current?.state === "active" ? (
@@ -1067,10 +1144,10 @@ export function CanvasSessionManager() {
           </>
         ) : current && interactiveTimedOut ? (
           <div className="interactive-auth-expired" role="status">
-            <strong>Secure sign-in time expired</strong>
+            <strong>Canvas sign-in time expired</strong>
             <span>
-              The previous browser was closed. Your synced Canvas data is safe,
-              and reopening it will not restart the expired attempt.
+              The previous attempt ended. Your synced Canvas data is safe; start
+              again to open a fresh local Canvas sign-in.
             </span>
             {!confirmingRestart ? (
               <button
@@ -1078,7 +1155,7 @@ export function CanvasSessionManager() {
                 disabled={busy}
                 onClick={() => setConfirmingRestart(true)}
               >
-                Start a new secure sign-in
+                Start a new Canvas sign-in
               </button>
             ) : (
               <div
@@ -1087,8 +1164,8 @@ export function CanvasSessionManager() {
                 aria-label="Confirm new secure sign-in"
               >
                 <p>
-                  This ends the expired attempt and creates a fresh 30-minute
-                  sign-in window.
+                  This ends the expired attempt and creates a fresh connection
+                  request for the extension.
                 </p>
                 <button
                   className="button primary"
@@ -1096,8 +1173,8 @@ export function CanvasSessionManager() {
                   onClick={() => void startNewInteractiveAttempt(current)}
                 >
                   {busy
-                    ? "Starting new secure sign-in…"
-                    : "Start a new secure sign-in"}
+                    ? "Starting new Canvas sign-in…"
+                    : "Start a new Canvas sign-in"}
                 </button>
                 <button
                   className="button secondary"
@@ -1113,37 +1190,27 @@ export function CanvasSessionManager() {
           <>
             <div className="popup-status" role="status" data-state={popupState}>
               <strong>
-                {needsInteractiveAttempt
-                  ? "Ready to prepare a secure browser"
-                  : popupState === "open"
-                  ? "Secure browser is open"
-                  : popupState === "blocked"
-                    ? "Popup was blocked"
-                    : popupState === "closed"
-                      ? "Secure browser window closed"
-                      : "Secure browser is ready"}
+                {detectedAccount
+                  ? `Canvas found: ${detectedAccount.name}`
+                  : phase === "agent-opening"
+                    ? "Opening Canvas in your browser"
+                    : "Waiting for Canvas sign-in"}
               </strong>
               <span>
-                {needsInteractiveAttempt
-                  ? "Start a new sign-in attempt. Canvas Grove will reserve the window first, then connect it when the session is ready."
-                  : popupState === "open"
-                  ? "Finish signing in there. Canvas Grove will detect completion automatically."
-                  : "Your Canvas session is still safe. Reopen the secure window to continue."}
+                {detectedAccount
+                  ? "Confirm this is the Canvas account you want Grove to sync."
+                  : "Finish your school sign-in in the Canvas tab. Grove will detect it without seeing your password or MFA."}
               </span>
             </div>
-            <button
+            {detectedAccount ? <button
+              className="button primary"
+              disabled={busy}
+              onClick={() => void finishExtensionAuth(current)}
+            >{busy ? "Connecting…" : `Connect as ${detectedAccount.name}`}</button> : <button
               className="button secondary"
               disabled={busy}
-              onClick={() => focusOrReopen(current)}
-            >
-              {needsInteractiveAttempt
-                ? busy
-                  ? "Preparing secure browser…"
-                  : "Start a new secure sign-in"
-                : popupState === "open"
-                ? "Focus secure browser"
-                : "Reopen secure browser"}
-            </button>
+              onClick={() => launchExisting(current)}
+            >{busy ? "Opening Canvas…" : "Open Canvas sign-in again"}</button>}
             <button
               className="danger-button"
               onClick={() => void remove(current)}
@@ -1153,8 +1220,7 @@ export function CanvasSessionManager() {
           </>
         ) : null}
         <small>
-          Verification is automatic. You never need to press an “I finished”
-          button.
+          Grove never receives your institution password or multi-factor code.
         </small>
       </div>
     </section>
@@ -1163,13 +1229,13 @@ export function CanvasSessionManager() {
 
 function PhaseList({ phase }: { phase: Phase }) {
   const phases: [Phase, string][] = [
-    ["agent-opening", "Opening institution sign-in"],
-    ["viewer-loading", "Connecting the secure viewer"],
+    ["agent-opening", "Opening Canvas in this browser"],
+    ["viewer-loading", "Waiting for the Grove extension"],
     [
       "takeover",
-      "Waiting for you to finish sign-in and multi-factor authentication",
+      "Waiting for you to finish Canvas sign-in",
     ],
-    ["verifying", "Verifying Canvas"],
+    ["verifying", "Confirming the detected Canvas account"],
     ["connected", "Connected and syncing"],
   ];
   const index = Math.max(
@@ -1215,6 +1281,10 @@ function codeMap(code: string) {
         POPUP_BLOCKED: "POPUP_BLOCKED",
         POPUP_CLOSED: "POPUP_CLOSED",
         VERIFY_PENDING: "VERIFY_PENDING",
+        EXTENSION_REQUIRED: "AUTH_REQUIRED",
+        EXTENSION_AUTH_FAILED: "UNKNOWN",
+        CANVAS_AUTH_NOT_VERIFIED: "CANVAS_AUTH_EXPIRED",
+        CANVAS_SESSION_COOKIE_MISSING: "CANVAS_AUTH_EXPIRED",
       } as Record<string, string>
     )[code] || "UNKNOWN"
   );

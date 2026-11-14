@@ -68,8 +68,8 @@ export function ExtensionConnect() {
       {phase === "done" ? <>
         <h1 id="connect-title">Browser connected</h1>
         <p><span className="chip success">Connected</span></p>
-        <p>Links to Canvas in Grove now open with your Canvas session already in this browser. You can close this tab or manage connected browsers in Settings.</p>
-        <div className={styles.actions}><AppLink className="button primary large" href="/">Back to Grove</AppLink><AppLink className="button secondary large" href="/settings#extension">Settings</AppLink></div>
+        <p>This browser can now complete Canvas sign-in for Grove. Your next step is to connect Canvas; Grove will show the Canvas account it finds before anything is saved.</p>
+        <div className={styles.actions}><AppLink className="button primary large" href="/settings#connection">Connect Canvas</AppLink><AppLink className="button secondary large" href="/settings#extension">Settings</AppLink></div>
       </> : phase === "missing" ? <>
         <h1 id="connect-title">Install the extension first</h1>
         <p>Canvas Grove could not find the Grove for Canvas extension in this browser. Install it, then check again.</p>
@@ -79,11 +79,12 @@ export function ExtensionConnect() {
         </div>
       </> : <>
         <h1 id="connect-title">Connect this browser</h1>
-        <p>Let the Grove for Canvas extension open Canvas links with your Canvas session, so Gradescope, MATLAB and New Quizzes work in this browser.</p>
+        <p>Canvas Grove uses this extension to let you sign in on your own browser, then securely connect that Canvas session to Grove.</p>
         <ul className={styles.facts}>
-          <li><strong>What it can do:</strong> read the Canvas session Grove already keeps for you and install it in this browser.</li>
-          <li><strong>What it cannot do:</strong> see your Grove password, other sites, or anything outside Grove and your Canvas site.</li>
-          <li><strong>You stay in control:</strong> disconnect this browser at any time from Settings and it stops working immediately.</li>
+          <li><strong>What it can do:</strong> after you approve the exact Canvas site, read that site&apos;s Canvas session and send it to Grove over an encrypted connection.</li>
+          <li><strong>What it cannot do:</strong> read your institution password, identity-provider cookies, Grove password, or unrelated sites.</li>
+          <li><strong>You confirm the account:</strong> Grove shows the Canvas identity detected in this browser before the session is saved.</li>
+          <li><strong>You stay in control:</strong> disconnect this browser at any time from Settings to revoke its Grove access immediately.</li>
         </ul>
         <label className={styles.field} htmlFor="device-name">Name this browser</label>
         <input id="device-name" className={styles.input} value={name} maxLength={60} onChange={(e) => setTypedName(e.target.value)} disabled={phase === "pairing" || phase === "checking"} autoComplete="off" />

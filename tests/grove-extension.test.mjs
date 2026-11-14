@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
-import { hasLiveSession, normalizeOrigin, sameOrigin, toChromeCookie } from "../extension/src/cookies.js";
+import { hasLiveSession, normalizeOrigin, sameOrigin, toChromeCookie, toServerCookie } from "../extension/src/cookies.js";
 
 const ORIGIN = "https://ufl.instructure.com";
 const NOW = 1_800_000_000;
@@ -39,4 +40,31 @@ test("a live Canvas session is recognised only by a non-expired session cookie",
   assert.equal(hasLiveSession([{ name: "canvas_session", expirationDate: NOW - 5 }], NOW), false);
   assert.equal(hasLiveSession([{ name: "_csrf_token", session: true }], NOW), false);
   assert.equal(hasLiveSession([], NOW), false);
+});
+
+test("browser cookies exported to Grove are narrowed to the exact Canvas host", () => {
+  const out = toServerCookie({
+    name: "canvas_session", value: "secret", domain: ".instructure.com", path: "/", expirationDate: NOW + 60,
+    httpOnly: true, secure: true, sameSite: "no_restriction", storeId: "profile-1",
+  }, ORIGIN, NOW);
+  assert.deepEqual(out, {
+    name: "canvas_session", value: "secret", domain: "ufl.instructure.com", path: "/", expires: NOW + 60,
+    httpOnly: true, secure: true, sameSite: "None",
+  });
+  assert.equal("storeId" in out, false);
+});
+
+test("browser cookie export refuses foreign, expired, oversized and wrong-partition cookies", () => {
+  const base = { name: "canvas_session", value: "v", domain: ".instructure.com", path: "/", session: true };
+  assert.equal(toServerCookie({ ...base, domain: "login.ufl.edu" }, ORIGIN, NOW), null);
+  assert.equal(toServerCookie({ ...base, expirationDate: NOW - 1 }, ORIGIN, NOW), null);
+  assert.equal(toServerCookie({ ...base, value: "x".repeat(16_385) }, ORIGIN, NOW), null);
+  assert.equal(toServerCookie({ ...base, partitionKey: { topLevelSite: "https://evil.example" } }, ORIGIN, NOW), null);
+});
+
+test("Canvas host access is optional and requested per exact origin", () => {
+  const manifest = JSON.parse(readFileSync(new URL("../extension/src/manifest.template.json", import.meta.url), "utf8"));
+  assert.deepEqual(manifest.host_permissions, ["__GROVE_PATTERN__"]);
+  assert.deepEqual(manifest.optional_host_permissions, ["https://*/*"]);
+  assert.ok(!JSON.stringify(manifest.host_permissions).includes("instructure.com"));
 });

@@ -1,8 +1,9 @@
 import { GROVE_ORIGIN } from "./config.js";
-import { sameOrigin, toChromeCookie } from "./cookies.js";
+import { hasLiveSession, sameOrigin, toChromeCookie, toServerCookie } from "./cookies.js";
 
 const UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
 const TOKEN = new RegExp(`^gfe1\\.${UUID}\\.${UUID}\\.[A-Za-z0-9_-]{43}$`);
+const CANVAS_AUTH_TTL_MS = 30 * 60 * 1000;
 
 // connection = { token | null, deviceName, canvasOrigin | null, revoked? }
 const loadConnection = async () => (await chrome.storage.local.get("connection")).connection ?? null;
@@ -13,7 +14,12 @@ const hasAccess = (origin) => chrome.permissions.contains({ origins: [hostPatter
 
 /** Authenticated call to Grove. A 401 DEVICE_INVALID means the browser was disconnected from the website. */
 async function groveFetch(connection, path, init = {}) {
-  const response = await fetch(`${GROVE_ORIGIN}${path}`, { ...init, credentials: "omit", cache: "no-store", headers: { authorization: `Bearer ${connection.token}` } });
+  const response = await fetch(`${GROVE_ORIGIN}${path}`, {
+    ...init,
+    credentials: "omit",
+    cache: "no-store",
+    headers: { ...(init.headers ?? {}), authorization: `Bearer ${connection.token}` },
+  });
   const body = await response.json().catch(() => null);
   if (response.status === 401 && body?.code === "DEVICE_INVALID") {
     await saveConnection({ ...connection, token: null, revoked: true });
@@ -26,13 +32,19 @@ async function groveFetch(connection, path, init = {}) {
  * Is this browser actually signed in to Canvas? A cookie named canvas_session proves nothing:
  * Canvas sets it for signed-out visitors too. Ask Canvas, as the browser, who the user is.
  */
-async function browserSignedIn(canvasOrigin) {
+async function browserIdentity(canvasOrigin) {
   if (!(await hasAccess(canvasOrigin))) return false;
   try {
     const response = await fetch(`${canvasOrigin}/api/v1/users/self`, { credentials: "include", cache: "no-store", redirect: "manual", headers: { accept: "application/json" } });
-    return response.status === 200;
-  } catch { return false; }
+    if (response.status !== 200) return null;
+    const body = await response.json().catch(() => null);
+    const id = typeof body?.id === "number" || typeof body?.id === "string" ? String(body.id) : "";
+    if (!/^[0-9]{1,30}$/.test(id)) return null;
+    const name = typeof body?.name === "string" ? body.name.trim().slice(0, 120) : "";
+    return { id, name: name || "Canvas user" };
+  } catch { return null; }
 }
+const browserSignedIn = async (canvasOrigin) => Boolean(await browserIdentity(canvasOrigin));
 
 /** Remember the last attempt so the popup and toolbar badge can say when Canvas refused the session. */
 async function recordResult(session) {
@@ -74,6 +86,78 @@ async function openCanvas(url, force) {
   await recordResult(session);
   await chrome.tabs.create({ url });
   return { ok: true, session: session.reason };
+}
+
+async function openCanvasAuthentication(connection, message) {
+  if (!connection?.token) return { ok: false, reason: "not-connected" };
+  let origin;
+  let loginUrl;
+  try {
+    origin = new URL(String(message.canvasOrigin ?? "")).origin;
+    loginUrl = new URL(String(message.loginUrl ?? `${origin}/login`));
+  } catch { return { ok: false, reason: "invalid-origin" }; }
+  if (!origin.startsWith("https://") || loginUrl.origin !== origin) return { ok: false, reason: "invalid-origin" };
+  const sessionId = String(message.sessionId ?? "");
+  if (!new RegExp(`^${UUID}$`).test(sessionId)) return { ok: false, reason: "invalid-session" };
+  // Save the requested exact origin before prompting. If Chrome requires the
+  // permission gesture to come from extension UI, the popup can now present a
+  // first-party "Allow access" button for this origin.
+  const updated = { ...connection, canvasOrigin: origin, revoked: false };
+  await saveConnection(updated);
+  let granted = await hasAccess(origin);
+  if (!granted) {
+    try { granted = await chrome.permissions.request({ origins: [hostPattern(origin)] }); }
+    catch { granted = false; }
+  }
+  if (!granted) return { ok: false, reason: "permission-required", canvasOrigin: origin };
+  await chrome.storage.local.set({ pendingCanvasAuth: { sessionId, canvasOrigin: origin, startedAt: Date.now() } });
+  await chrome.tabs.create({ url: loginUrl.toString() });
+  return { ok: true, reason: "opened", canvasOrigin: origin };
+}
+
+async function captureCanvasAuthentication(connection, message) {
+  if (!connection?.token) return { ok: false, reason: "not-connected" };
+  const pending = (await chrome.storage.local.get("pendingCanvasAuth")).pendingCanvasAuth;
+  const sessionId = String(message.sessionId ?? "");
+  const canvasOrigin = String(message.canvasOrigin ?? "");
+  if (!pending || pending.sessionId !== sessionId || pending.canvasOrigin !== canvasOrigin) return { ok: false, reason: "auth-mismatch" };
+  if (!Number.isFinite(pending.startedAt) || Date.now() - pending.startedAt > CANVAS_AUTH_TTL_MS) {
+    await chrome.storage.local.remove("pendingCanvasAuth");
+    return { ok: false, reason: "auth-expired" };
+  }
+  if (!(await hasAccess(canvasOrigin))) return { ok: false, reason: "permission-required" };
+  if (!(await browserSignedIn(canvasOrigin))) return { ok: false, reason: "not-signed-in" };
+  let raw;
+  try { raw = await chrome.cookies.getAll({ url: `${canvasOrigin}/` }); }
+  catch { return { ok: false, reason: "cookie-read-failed" }; }
+  const cookies = raw.map((cookie) => toServerCookie(cookie, canvasOrigin)).filter(Boolean);
+  if (!hasLiveSession(raw) || !cookies.length) return { ok: false, reason: "session-cookie-missing" };
+  const { response, body, revoked } = await groveFetch(connection, "/api/extension/canvas-auth", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ sessionId, canvasOrigin, cookies }),
+  });
+  if (revoked) return { ok: false, reason: "revoked" };
+  if (!response.ok || !body?.connected) return { ok: false, reason: body?.code ?? "capture-rejected" };
+  await chrome.storage.local.remove("pendingCanvasAuth");
+  await saveConnection({ ...connection, canvasOrigin, revoked: false });
+  await recordResult({ ok: true, reason: "captured" });
+  return { ok: true, reason: "captured", canvasOrigin };
+}
+
+async function checkCanvasAuthentication(connection, message) {
+  if (!connection?.token) return { ok: false, reason: "not-connected" };
+  const pending = (await chrome.storage.local.get("pendingCanvasAuth")).pendingCanvasAuth;
+  const sessionId = String(message.sessionId ?? "");
+  const canvasOrigin = String(message.canvasOrigin ?? "");
+  if (!pending || pending.sessionId !== sessionId || pending.canvasOrigin !== canvasOrigin) return { ok: false, reason: "auth-mismatch" };
+  if (!Number.isFinite(pending.startedAt) || Date.now() - pending.startedAt > CANVAS_AUTH_TTL_MS) {
+    await chrome.storage.local.remove("pendingCanvasAuth");
+    return { ok: false, reason: "auth-expired" };
+  }
+  if (!(await hasAccess(canvasOrigin))) return { ok: false, reason: "permission-required" };
+  const account = await browserIdentity(canvasOrigin);
+  return account ? { ok: true, signedIn: true, account } : { ok: true, signedIn: false };
 }
 
 async function popupState() {
@@ -120,6 +204,13 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
     if (fromPopup && message?.type === "popup-state") return popupState();
     if (fromPopup && message?.type === "disconnect") return disconnect();
     if ((fromPopup || fromGrove) && message?.type === "open") return openCanvas(String(message.url ?? ""), !!message.force);
+    if (fromGrove && message?.type === "canvas-auth-state") {
+      const connection = await loadConnection();
+      return { ok: true, installed: true, paired: !!connection?.token, canvasOrigin: connection?.canvasOrigin ?? null };
+    }
+    if (fromGrove && message?.type === "canvas-auth-open") return openCanvasAuthentication(await loadConnection(), message);
+    if (fromGrove && message?.type === "canvas-auth-check") return checkCanvasAuthentication(await loadConnection(), message);
+    if (fromGrove && message?.type === "canvas-auth-capture") return captureCanvasAuthentication(await loadConnection(), message);
     if (fromConnectPage && message?.type === "pair") return pair(message);
     return { ok: false, reason: "not-allowed" };
   })().then(respond, () => respond({ ok: false, reason: "error" }));

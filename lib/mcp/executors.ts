@@ -2,6 +2,7 @@ import "server-only";
 import { withTenantSql } from "@/lib/db";
 import type { ActionRow, ExecResult, Executor } from "./actions";
 import { executeStartQuiz } from "./quiz-core";
+import { executeCourseUploadAction } from "./course-upload";
 
 // Executors for staged tools, run only after approval (or auto mode).
 //
@@ -14,7 +15,7 @@ import { executeStartQuiz } from "./quiz-core";
 //   send_message        not sync discussions/conversations, so it cannot preview the target or
 //                       re-check that replies are still allowed. Not exercised against Canvas.
 
-export const EXECUTABLE_TOOLS = new Set(["start_quiz_attempt"]);
+export const EXECUTABLE_TOOLS = new Set(["start_quiz_attempt", "upload_course_document"]);
 export const STAGED_ONLY_TOOLS = ["submit_assignment", "reply_to_discussion", "send_message"] as const;
 
 const notSupported = (what: string): ExecResult => ({ ok: false, code: "NOT_SUPPORTED_YET", message: `${what} is not supported by Canvas Grove yet. Nothing was sent to Canvas.` });
@@ -32,6 +33,7 @@ const submitAssignment: Executor = async (ctx, action: ActionRow) => {
 const EXECUTORS: Record<string, Executor> = {
   start_quiz_attempt: executeStartQuiz,
   submit_assignment: submitAssignment,
+  upload_course_document: executeCourseUploadAction,
   reply_to_discussion: async () => notSupported("Replying to discussions"),
   send_message: async () => notSupported("Sending Canvas messages"),
 };

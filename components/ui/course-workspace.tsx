@@ -15,6 +15,7 @@ import { Icon } from "./icons";
 import styles from "./course-workspace.module.css";
 import { useDisplayTimeZone } from "./use-display-timezone";
 import { ActiveMarker, NAV_BACK, PageTransition } from "./page-transition";
+import { CourseFileUpload, type UploadedCourseFile } from "./course-file-upload";
 
 export type CourseSection = "overview" | "assignments" | "announcements" | "files" | "syllabus" | "modules" | "pages" | "grades";
 type Tab = { id: string; label: string; hidden?: boolean; position?: number; type?: "native" | "external"; nativePath?: string | null; canvasUrl?: string | null };
@@ -125,7 +126,7 @@ function ResourceView({ kind, data, courseId, course }: { kind: CourseSection; d
   if (kind === "announcements") return <Announcements items={array(data.announcements)} />;
   if (kind === "syllabus") return <Syllabus data={data} />;
   if (kind === "modules") return <Modules items={array(data.modules)} />;
-  if (kind === "files") return <Files files={array(data.files)} folders={array(data.folders)} />;
+  if (kind === "files") return <Files files={array(data.files)} folders={array(data.folders)} courseId={courseId} />;
   if (kind === "grades") return <CourseGrades courseId={courseId} />;
   return <Pages items={array(data.pages)} />;
 }
@@ -204,14 +205,17 @@ function Announcements({ items }: { items: Item[] }) {
   </>;
 }
 
-function Files({ files, folders }: { files: Item[]; folders: Item[] }) {
+function Files({ files, folders, courseId }: { files: Item[]; folders: Item[]; courseId: string }) {
   const [query, setQuery] = useState(""), [folder, setFolder] = useState<string | null>(null), [limit, setLimit] = useState(30);
+  const [recent, setRecent] = useState<Item[]>([]);
   const normalized = query.trim().toLowerCase();
-  const visibleFiles = files.filter(file => (!folder || String(file.folderId) === folder) && text(file.displayName, "").toLowerCase().includes(normalized));
+  const allFiles = [...recent, ...files.filter(file => !recent.some(item => item.canvasFileId === file.canvasFileId))];
+  const visibleFiles = allFiles.filter(file => (!folder || String(file.folderId) === folder) && text(file.displayName, "").toLowerCase().includes(normalized));
   return <>
-    <SectionHead title="Files" count={files.length}>
+    <SectionHead title="Files" count={allFiles.length}>
       <label className={styles.searchField}><Icon name="search" /><span className="sr-only">Search course files</span><input type="search" value={query} onChange={event => { setQuery(event.target.value); setLimit(30); }} placeholder="Filter files" /></label>
     </SectionHead>
+    <CourseFileUpload courseId={courseId} folders={folders} onUploaded={(file: UploadedCourseFile) => setRecent(current => [{ ...file, id: file.groveFileId, updatedAt: new Date().toISOString() }, ...current.filter(item => item.canvasFileId !== file.canvasFileId)])} />
     {folders.length > 0 && <div className={styles.chips} role="group" aria-label="Folders"><button aria-pressed={!folder} onClick={() => setFolder(null)}>All files</button>{folders.slice(0, 12).map((item, index) => <button key={id(item, index)} aria-pressed={folder === String(item.id)} onClick={() => { setFolder(String(item.id)); setLimit(30); }}>{text(item.name ?? item.fullName, "Folder")}<span className="count">{Number(item.filesCount ?? 0)}</span></button>)}</div>}
     {visibleFiles.length ? <div className={`${styles.listCard} ${styles.scroll}`}><ul className={styles.fileList}>{visibleFiles.slice(0, limit).map((file, index) => <FileRow key={id(file, index)} file={file} />)}</ul>{visibleFiles.length > limit && <button className={styles.loadMore} onClick={() => setLimit(value => value + 30)}>Show more files</button>}</div>
       : <State title={normalized || folder ? "No matching files" : "No files yet"} body={normalized || folder ? "Try a shorter search or another folder." : "Published files will appear after the next successful sync."} />}

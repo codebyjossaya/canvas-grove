@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=360">
   <title>Grove for Canvas</title>
+  <link rel="stylesheet" href="tokens.css">
   <link rel="stylesheet" href="popup.css">
 </head>
 <body>
@@ -20,9 +21,9 @@
 
     <section data-view="disconnected" hidden>
       <h1>Connect to Canvas Grove</h1>
-      <p>Sign in to Canvas on this device, confirm the account, and connect that Canvas session to Grove.</p>
+      <p>Pair this browser with your Grove account, then sign in to Canvas from Grove's setup.</p>
       <button id="connect" class="button primary large block" type="button">Connect to Canvas Grove</button>
-      <p class="hint">You will confirm on the Canvas Grove website. Your institution password is never sent to Grove.</p>
+      <p class="hint">You confirm pairing on the Canvas Grove website. Your institution password is never sent to Grove.</p>
     </section>
 
     <section data-view="revoked" hidden>
@@ -33,14 +34,23 @@
 
     <section data-view="offline" hidden>
       <h1>Can't reach Canvas Grove</h1>
-      <p>Check your connection and try again. Your browser pairing has not been changed.</p>
+      <p>Check your connection and try again. Your browser pairing has not changed.</p>
       <button id="retry" class="button secondary large block" type="button">Try again</button>
+    </section>
+
+    <section data-view="signin" hidden>
+      <h1 id="signin-title">Canvas sign-in in progress</h1>
+      <p id="signin-text"></p>
+      <div class="actions">
+        <button id="signin-focus" class="button primary large block" type="button">Go to sign-in tab</button>
+        <button id="signin-grove" class="button secondary large block" type="button">Open Canvas Grove</button>
+      </div>
     </section>
 
     <section data-view="connected" hidden>
       <dl class="rows">
         <div><dt>Browser</dt><dd id="device"></dd></div>
-        <div><dt>Canvas site</dt><dd id="host"></dd></div>
+        <div><dt>Canvas site</dt><dd id="host" class="mono"></dd></div>
         <div><dt>Canvas in browser</dt><dd><span id="chip-browser" class="chip"></span></dd></div>
         <div><dt>Grove connection</dt><dd><span id="chip-grove" class="chip"></span></dd></div>
       </dl>
@@ -50,7 +60,7 @@
         <button id="grant" class="button primary large block" type="button" hidden>Allow access to Canvas</button>
         <button id="open-grove" class="button secondary large block" type="button">Open Canvas Grove</button>
       </div>
-      <p class="hint">Grove shows the detected Canvas account and waits for confirmation before storing a new session.</p>
+      <p class="hint">Canvas links in Grove open here with your Canvas session already signed in.</p>
       <footer><button id="disconnect" class="danger-button" type="button">Disconnect this browser</button></footer>
     </section>
   </main>

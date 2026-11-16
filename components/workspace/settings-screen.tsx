@@ -5,6 +5,8 @@ import { ConnectionsSection } from "./connect-agent/connections-list";
 import type { ConnectionsData } from "./connect-agent/use-connections";
 import type { AutoTarget } from "./approvals/auto-model";
 import { ExtensionDevices, type ExtensionDeviceFixture } from "./extension-devices";
+import { ScopesSettings } from "./scopes-settings";
+import type { ScopeSettings } from "@/lib/scopes/catalog";
 import { BackgroundSyncStatus } from "@/components/ui/sync-status";
 import { ThemeControl } from "@/components/ui/theme-provider";
 import { TimeZoneSettings } from "@/components/ui/timezone-settings";
@@ -17,16 +19,17 @@ const shortcuts: Array<[string[], string]> = [
   [["J", "K"], "Next / previous item in Inbox"],
 ];
 
-export function SettingsScreen({ fixtures }: { fixtures?: { connections: ConnectionsData; autoTargets: AutoTarget[]; extensionDevices: ExtensionDeviceFixture[] } }) {
+export function SettingsScreen({ fixtures }: { fixtures?: { connections: ConnectionsData; autoTargets: AutoTarget[]; extensionDevices: ExtensionDeviceFixture[]; scopes?: ScopeSettings } }) {
   return <main className={`page ${styles.page}`}>
     <header className={`page-head ${styles.header}`}><div><p className="eyebrow">Your workspace</p><h1>Settings</h1><p>Connection, sync, appearance and privacy.</p></div><div className={`page-actions ${styles.headerActions}`}><ConnectAgentButton fixture={fixtures?.connections} /><AppLink className="button secondary" href="/welcome?replay=1">Replay orientation</AppLink></div></header>
     <div className={styles.layout}>
       <aside className={styles.navigation}><p>On this page</p><nav className={styles.toc} aria-label="Settings sections">
-        <a href="#connection">Canvas connection</a><a href="#extension">Browser extension</a><a href="#agents">Agents (MCP)</a><a href="#sync">Background sync</a><a href="#appearance">Appearance</a><a href="#time">Time zone</a><a href="#shortcuts">Keyboard</a>
+        <a href="#connection">Canvas connection</a><a href="#extension">Browser extension</a><a href="#data">Data &amp; permissions</a><a href="#agents">Agents (MCP)</a><a href="#sync">Background sync</a><a href="#appearance">Appearance</a><a href="#time">Time zone</a><a href="#shortcuts">Keyboard</a>
       </nav></aside>
       <div className={styles.sections}>
         <section id="connection" className={styles.section} aria-label="Canvas connection"><CanvasSessionManager /></section>
         <ExtensionDevices fixture={fixtures?.extensionDevices} />
+        <ScopesSettings fixture={fixtures?.scopes} />
         <section id="agents" className="panel" aria-labelledby="agents-heading">
           <h2 id="agents-heading">Agents (MCP)</h2>
           <p>Let an AI assistant such as Claude, ChatGPT, Cursor or Codex read your courses, assignments and grades. By default it is read-only. Anything it proposes, such as submitting work, waits for your approval, and you can revoke access at any time.</p>

@@ -58,6 +58,10 @@ export const userPreferences = pgTable("user_preferences", {
   retention: jsonb("retention").notNull().default({}),
   orientationVersion: text("orientation_version"),
   orientationCompletedAt: timestamp("orientation_completed_at", { withTimezone: true }),
+  // Orientation v2 scopes (lib/scopes). NULL = never saved: every data area on, agents may propose.
+  dataScopes: text("data_scopes").array(),
+  agentDefaults: jsonb("agent_defaults"),
+  scopesSavedAt: timestamp("scopes_saved_at", { withTimezone: true }),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 }, (t) => [check("user_preferences_week_start_check", sql`${t.weekStartsOn} between 0 and 6`)]);
 

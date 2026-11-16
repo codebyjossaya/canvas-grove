@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Grove sign-in</title>
+  <link rel="stylesheet" href="tokens.css">
+  <link rel="stylesheet" href="pages.css">
+</head>
+<body>
+  <div class="panel">
+    <header class="top">
+      <span class="grove-mark" aria-hidden="true"><i></i><i></i><i></i></span>
+      <strong class="title">Grove for Canvas</strong>
+    </header>
+
+    <main>
+      <section data-view="loading" aria-label="Loading">
+        <div class="skeleton wide"></div><div class="skeleton"></div><div class="skeleton short"></div>
+      </section>
+
+      <section data-view="active" class="view" hidden>
+        <h1 id="title" tabindex="-1">Sign in to Canvas in this tab</h1>
+        <p id="body" class="body">Use your usual school login. Two-factor prompts such as Duo appear on the page as normal.</p>
+
+        <div class="status" role="status" aria-live="polite">
+          <span id="watch" class="watch" aria-hidden="true"></span>
+          <div>
+            <strong id="status-title">Waiting for Canvas to sign you in</strong>
+            <span id="status-detail" class="detail"></span>
+          </div>
+        </div>
+
+        <p id="error" class="note danger" role="alert" hidden></p>
+
+        <h2>What happens next</h2>
+        <ol class="next">
+          <li id="step-1">You sign in on the Canvas page.</li>
+          <li id="step-2">Grove confirms which Canvas account signed in.</li>
+          <li id="step-3">This tab closes by itself and you're back in Grove.</li>
+        </ol>
+
+        <p class="fine">Grove reads only the cookies for <span class="mono" id="host-fine"></span>. Your password stays on your school's sign-in page.</p>
+
+        <div class="actions">
+          <button id="retry" class="button primary block" type="button" hidden>Try again</button>
+          <button id="cancel" class="button secondary block" type="button">Cancel sign-in</button>
+        </div>
+      </section>
+
+      <section data-view="ended" class="view" hidden>
+        <h1 id="ended-title" tabindex="-1">This sign-in has ended</h1>
+        <p id="ended-text" class="body">Start sign-in again from Grove.</p>
+        <div class="actions"><button id="close" class="button secondary block" type="button">Close tab</button></div>
+      </section>
+    </main>
+  </div>
+  <script type="module" src="sidepanel.js"></script>
+</body>
+</html>

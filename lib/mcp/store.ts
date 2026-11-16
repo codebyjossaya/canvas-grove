@@ -251,8 +251,10 @@ export async function revokeGrant(ownerId: string, grantId: string): Promise<boo
 }
 
 /** True when the Canvas file is one of the owner's own synced course files. */
+/** False when the file is not the owner's, or the owner turned off the "content" data scope (served as 404). */
 export async function ownsCourseFile(ownerId: string, canvasFileId: string): Promise<boolean> {
   const rows = await withTenantSql(ownerId, (tx) => tx`select 1 from course_files f join courses c on c.owner_id = f.owner_id and c.id = f.course_id
-    where f.owner_id = ${ownerId} and f.canvas_file_id = ${canvasFileId} and f.deleted_at is null and c.deleted_at is null limit 1`);
+    where f.owner_id = ${ownerId} and f.canvas_file_id = ${canvasFileId} and f.deleted_at is null and c.deleted_at is null
+      and not exists(select 1 from user_preferences p where p.owner_id = ${ownerId} and p.data_scopes is not null and not ('content' = any(p.data_scopes))) limit 1`);
   return rows.length > 0;
 }

@@ -6,6 +6,9 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { withTenantSql } from "@/lib/db";
 import { quizClassification, quizEligibility } from "./action-policy";
 import { BODY_CAP, canvasFileIdsIn, fileDownloadPath, fitItems, htmlToText, likePattern, untrusted } from "./content";
+import { DATA_SCOPES, type DataScope } from "@/lib/scopes/catalog";
+import { blockedScopeForTool, redactForScopes, SCOPE_DISABLED, ScopeDisabledError } from "@/lib/scopes/settings";
+import { enabledDataScopesTx } from "@/lib/scopes/store";
 
 // Phase-1 read-only tools over Grove's synced Postgres. Policy (docs/MCP_CONTRACT.md):
 //  * never quiz questions/answers (quizzes are metadata only, no descriptions);
@@ -22,6 +25,11 @@ const READ_ONLY = { readOnlyHint: true, openWorldHint: false, destructiveHint: f
 type Data = Record<string, unknown>;
 const ok = (data: Data): CallToolResult => ({ content: [{ type: "text", text: JSON.stringify(data) }], structuredContent: data });
 const fail = (message: string): CallToolResult => ({ content: [{ type: "text", text: message }], isError: true });
+/** A data area the user turned off (Settings > Data & permissions): structured, never a generic failure. */
+const scopeFail = (error: ScopeDisabledError): CallToolResult => {
+  const data = { code: SCOPE_DISABLED, scope: error.scope, message: error.message };
+  return { content: [{ type: "text", text: JSON.stringify(data) }], structuredContent: data, isError: true };
+};
 class ToolError extends Error {}
 
 const courseRef = z.string().min(1).max(64).describe("Course id: the Canvas course id (from list_courses) or Grove's course id");
@@ -86,6 +94,8 @@ function assignmentsQuery(tx: Tx, ownerId: string, where: postgres.PendingQuery<
 }
 
 const CALENDAR_MAX_DAYS = 120;
+/** Which data area each status/course count belongs to. */
+const COUNT_SCOPE: Record<string, DataScope> = { courses: "courses", assignments: "assignments", pages: "content", files: "content", announcements: "announcements", quizzes: "quizzes" };
 
 /** The user's own Grove calendar events (custom_events, Grove-only) overlapping [from, to); same rule as lib/custom-events/store. */
 async function customEvents(tx: Tx, ownerId: string, from: Date, to: Date, courseId?: string) {
@@ -120,13 +130,21 @@ const truncatedList = (key: string, items: unknown[], offset: number, extra: Dat
 });
 
 export function registerTools(server: McpServer, ownerId: string, scopes: string[] = ["canvas:read"]) {
-  const run = (name: string, work: (tx: Tx) => Promise<Data>) => async (): Promise<CallToolResult> => {
+  // Data scopes are read per call (the user can change them at any time); a tool whose whole area is
+  // off fails with SCOPE_DISABLED, mixed tools drop the disabled parts, grades off nulls score fields.
+  const run = (name: string, work: (tx: Tx, enabled: DataScope[]) => Promise<Data>) => async (): Promise<CallToolResult> => {
     const started = Date.now();
     let status = "ok";
     try {
-      const data = await withTenantSql(ownerId, async (tx) => ({ ...(await work(tx)), syncedAt: await syncedAt(tx, ownerId) }));
+      const data = await withTenantSql(ownerId, async (tx) => {
+        const enabled = await enabledDataScopesTx(tx, ownerId);
+        const blocked = blockedScopeForTool(name, enabled);
+        if (blocked) throw new ScopeDisabledError(blocked);
+        return redactForScopes({ ...(await work(tx, enabled)), syncedAt: await syncedAt(tx, ownerId) }, enabled);
+      });
       return ok(data);
     } catch (error) {
+      if (error instanceof ScopeDisabledError) { status = SCOPE_DISABLED; return scopeFail(error); }
       status = error instanceof ToolError ? "not_found" : "error";
       return fail(error instanceof ToolError ? error.message : "Grove could not read this data right now.");
     } finally {
@@ -138,7 +156,7 @@ export function registerTools(server: McpServer, ownerId: string, scopes: string
     title: "Grove status",
     description: "Overview of the user's Canvas Grove account: connected school, timezone, how much is synced and when it last synced. Call this first if unsure what data exists.",
     inputSchema: {}, annotations: READ_ONLY,
-  }, () => run("grove_status", async (tx) => {
+  }, () => run("grove_status", async (tx, enabled) => {
     const [account] = await tx<{ canvas_base_url: string; timezone: string | null; status: string; last_synced_at: Stamp }[]>`select canvas_base_url, timezone, status::text as status, last_synced_at from canvas_accounts where owner_id = ${ownerId} order by last_synced_at desc nulls last limit 1`;
     const [counts] = await tx<Record<string, string>[]>`select
       (select count(*) from courses where owner_id = ${ownerId} and deleted_at is null)::text as courses,
@@ -150,7 +168,8 @@ export function registerTools(server: McpServer, ownerId: string, scopes: string
     const [running] = await tx<{ n: string }[]>`select count(*)::text as n from sync_jobs where owner_id = ${ownerId} and status in ('queued', 'leased', 'running')`;
     return {
       connected: !!account, canvasUrl: account?.canvas_base_url ?? null, timezone: account?.timezone ?? null, connectionStatus: account?.status ?? null,
-      counts: Object.fromEntries(Object.entries(counts).map(([k, v]) => [k, Number(v)])), syncInProgress: Number(running.n) > 0,
+      counts: Object.fromEntries(Object.entries(counts).filter(([k]) => enabled.includes(COUNT_SCOPE[k] ?? "courses")).map(([k, v]) => [k, Number(v)])), syncInProgress: Number(running.n) > 0,
+      dataAccess: { enabled, disabled: DATA_SCOPES.filter((scope) => !enabled.includes(scope)), note: "Disabled areas can be turned on by the user in Canvas Grove Settings > Data & permissions." },
       capabilities: scopes.includes("canvas:write")
         ? "Reads Canvas data and can PROPOSE actions; Canvas changes wait for the user's approval in Grove unless they turned on auto mode for this connection. Supported Classic Quizzes, including graded assessments, require an approved entry-scoped attempt."
         : "Read-only connection. Quiz questions are only available inside an approved quiz session on a connection allowed to propose actions.",
@@ -171,7 +190,7 @@ export function registerTools(server: McpServer, ownerId: string, scopes: string
     title: "Get course",
     description: "One course: details, current grade, the syllabus as text, content counts and the next assignments due.",
     inputSchema: { course: courseRef }, annotations: READ_ONLY,
-  }, ({ course }) => run("get_course", async (tx) => {
+  }, ({ course }) => run("get_course", async (tx, enabled) => {
     const c = await resolveCourse(tx, ownerId, course);
     const [counts] = await tx<Record<string, string>[]>`select
       (select count(*) from assignments where owner_id = ${ownerId} and course_id = ${c.id} and deleted_at is null)::text as assignments,
@@ -179,10 +198,10 @@ export function registerTools(server: McpServer, ownerId: string, scopes: string
       (select count(*) from course_files where owner_id = ${ownerId} and course_id = ${c.id} and deleted_at is null)::text as files,
       (select count(*) from announcements where owner_id = ${ownerId} and course_id = ${c.id})::text as announcements,
       (select count(*) from quizzes where owner_id = ${ownerId} and course_id = ${c.id} and deleted_at is null)::text as quizzes`;
-    const upcoming = await assignmentsQuery(tx, ownerId, tx`and course_id = ${c.id} and status in ('upcoming', 'past_due', 'missing') and due_at > now() - interval '7 days'`, tx`order by due_at asc nulls last`, 10, 0);
+    const upcoming = enabled.includes("assignments") ? await assignmentsQuery(tx, ownerId, tx`and course_id = ${c.id} and status in ('upcoming', 'past_due', 'missing') and due_at > now() - interval '7 days'`, tx`order by due_at asc nulls last`, 10, 0) : [];
     const syllabus = htmlToText(c.syllabus_body, 20_000);
     return {
-      course: courseOut(c), counts: Object.fromEntries(Object.entries(counts).map(([k, v]) => [k, Number(v)])),
+      course: courseOut(c), counts: Object.fromEntries(Object.entries(counts).filter(([k]) => enabled.includes(COUNT_SCOPE[k] ?? "courses")).map(([k, v]) => [k, Number(v)])),
       upcoming: upcoming.map(assignmentOut),
       syllabus: syllabus.text ? untrusted(syllabus.text) : null, truncated: syllabus.truncated,
     };
@@ -232,12 +251,12 @@ export function registerTools(server: McpServer, ownerId: string, scopes: string
     title: "Upcoming work",
     description: "Everything due in the next N days across all courses that is not yet submitted (set includeSubmitted to see all), soonest first. Also lists quizzes that are not Canvas assignments (practice quizzes, surveys) due in the window and the user's own Grove calendar events.",
     inputSchema: { days: z.number().int().min(1).max(60).default(7).describe("Look-ahead window in days (default 7)"), includeSubmitted: z.boolean().default(false) }, annotations: READ_ONLY,
-  }, ({ days, includeSubmitted }) => run("upcoming", async (tx) => {
+  }, ({ days, includeSubmitted }) => run("upcoming", async (tx, enabled) => {
     const from = new Date(), to = new Date(from.getTime() + days * 86_400_000);
     const rows = await assignmentsQuery(tx, ownerId,
       tx`and due_at >= now() and due_at < now() + ${`${days} days`}::interval ${includeSubmitted ? tx`` : tx`and status in ('upcoming', 'past_due', 'missing')`}`,
       tx`order by due_at asc`, 300, 0);
-    const quizzes = (await standaloneQuizzes(tx, ownerId, from, to)).filter((q) => includeSubmitted || !q.taken);
+    const quizzes = enabled.includes("quizzes") ? (await standaloneQuizzes(tx, ownerId, from, to)).filter((q) => includeSubmitted || !q.taken) : [];
     const events = await customEvents(tx, ownerId, from, to);
     return fitItems(rows.map(assignmentOut), truncatedList("items", rows, 0, { days, now: from.toISOString(), quizzes, events }));
   })());
@@ -250,13 +269,13 @@ export function registerTools(server: McpServer, ownerId: string, scopes: string
       to: z.string().datetime({ offset: true }).describe("ISO date-time, end of the range (at most 120 days after from)"),
       course: courseRef.optional(),
     }, annotations: READ_ONLY,
-  }, ({ from, to, course }) => run("calendar", async (tx) => {
+  }, ({ from, to, course }) => run("calendar", async (tx, enabled) => {
     const start = new Date(from), end = new Date(to);
     if (!(end > start)) throw new ToolError("to must be after from.");
     if (end.getTime() - start.getTime() > CALENDAR_MAX_DAYS * 86_400_000) throw new ToolError(`The range can be at most ${CALENDAR_MAX_DAYS} days.`);
     const c = course ? await resolveCourse(tx, ownerId, course) : null;
     const rows = await assignmentsQuery(tx, ownerId, tx`and due_at >= ${start.toISOString()} and due_at < ${end.toISOString()} ${c ? tx`and course_id = ${c.id}` : tx``}`, tx`order by due_at asc`, 500, 0);
-    const quizzes = await standaloneQuizzes(tx, ownerId, start, end, c?.id);
+    const quizzes = enabled.includes("quizzes") ? await standaloneQuizzes(tx, ownerId, start, end, c?.id) : [];
     const events = await customEvents(tx, ownerId, start, end, c?.id);
     const entries = [
       ...rows.map((a) => ({ kind: "assignment", at: iso(a.due_at), ...assignmentOut(a) })),
@@ -376,7 +395,8 @@ export function registerTools(server: McpServer, ownerId: string, scopes: string
     title: "Search",
     description: "Search course names, assignments (titles and instructions), pages (titles and bodies), announcements (titles and text), quiz titles and file names across all courses.",
     inputSchema: { query: z.string().min(2).max(100), limit: limitArg(50, 20) }, annotations: READ_ONLY,
-  }, ({ query, limit }) => run("search", async (tx) => {
+  }, ({ query, limit }) => run("search", async (tx, enabled) => {
+    const on = (scope: DataScope) => enabled.includes(scope);
     const like = likePattern(query);
     const snippet = (html: string | null) => {
       const text = htmlToText(html, 200_000).text.replace(/\s+/g, " ");
@@ -385,19 +405,19 @@ export function registerTools(server: McpServer, ownerId: string, scopes: string
       return untrusted(`${at > 80 ? "…" : ""}${text.slice(Math.max(0, at - 80), at + query.length + 120)}…`);
     };
     const courses = await tx<{ canvas_course_id: string; name: string; course_code: string | null }[]>`select canvas_course_id, name, course_code from courses where owner_id = ${ownerId} and deleted_at is null and (name ilike ${like} or course_code ilike ${like}) limit ${limit}`;
-    const assignments = await tx<{ canvas_assignment_id: string; name: string; due_at: Stamp; description_html: string | null; canvas_course_id: string; course_name: string }[]>`
+    const assignments = !on("assignments") ? [] : await tx<{ canvas_assignment_id: string; name: string; due_at: Stamp; description_html: string | null; canvas_course_id: string; course_name: string }[]>`
       select a.canvas_assignment_id, a.name, a.due_at, a.description_html, c.canvas_course_id, c.name as course_name from assignments a join courses c on c.owner_id = a.owner_id and c.id = a.course_id
       where a.owner_id = ${ownerId} and a.deleted_at is null and c.deleted_at is null and (a.name ilike ${like} or a.description_html ilike ${like}) order by (a.name ilike ${like}) desc, a.due_at desc nulls last limit ${limit}`;
-    const pages = await tx<{ canvas_page_url: string; title: string; body_html: string | null; canvas_course_id: string; course_name: string }[]>`
+    const pages = !on("content") ? [] : await tx<{ canvas_page_url: string; title: string; body_html: string | null; canvas_course_id: string; course_name: string }[]>`
       select p.canvas_page_url, p.title, p.body_html, c.canvas_course_id, c.name as course_name from course_pages p join courses c on c.owner_id = p.owner_id and c.id = p.course_id
       where p.owner_id = ${ownerId} and p.deleted_at is null and c.deleted_at is null and (p.title ilike ${like} or p.body_html ilike ${like}) order by (p.title ilike ${like}) desc, p.title limit ${limit}`;
-    const files = await tx<{ canvas_file_id: string; display_name: string; content_type: string | null; canvas_course_id: string; course_name: string }[]>`
+    const files = !on("content") ? [] : await tx<{ canvas_file_id: string; display_name: string; content_type: string | null; canvas_course_id: string; course_name: string }[]>`
       select f.canvas_file_id, f.display_name, f.content_type, c.canvas_course_id, c.name as course_name from course_files f join courses c on c.owner_id = f.owner_id and c.id = f.course_id
       where f.owner_id = ${ownerId} and f.deleted_at is null and c.deleted_at is null and f.display_name ilike ${like} order by f.display_name limit ${limit}`;
-    const announcements = await tx<{ canvas_announcement_id: string; title: string; body_html: string | null; posted_at: Stamp; canvas_course_id: string | null; course_name: string | null }[]>`
+    const announcements = !on("announcements") ? [] : await tx<{ canvas_announcement_id: string; title: string; body_html: string | null; posted_at: Stamp; canvas_course_id: string | null; course_name: string | null }[]>`
       select a.canvas_announcement_id, a.title, a.body_html, a.posted_at, c.canvas_course_id, c.name as course_name from announcements a left join courses c on c.owner_id = a.owner_id and c.id = a.course_id
       where a.owner_id = ${ownerId} and (a.title ilike ${like} or a.body_html ilike ${like}) order by (a.title ilike ${like}) desc, a.posted_at desc nulls last limit ${limit}`;
-    const quizzes = await tx<{ canvas_quiz_id: string; title: string; due_at: Stamp; canvas_course_id: string; course_name: string }[]>`
+    const quizzes = !on("quizzes") ? [] : await tx<{ canvas_quiz_id: string; title: string; due_at: Stamp; canvas_course_id: string; course_name: string }[]>`
       select q.canvas_quiz_id, q.title, q.due_at, c.canvas_course_id, c.name as course_name from quizzes q join courses c on c.owner_id = q.owner_id and c.id = q.course_id
       where q.owner_id = ${ownerId} and q.deleted_at is null and c.deleted_at is null and q.title ilike ${like} order by q.due_at desc nulls last limit ${limit}`;
     const results = [

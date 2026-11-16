@@ -3,13 +3,13 @@
 import { useEffect, useId, useRef, useState, useSyncExternalStore } from "react";
 import { Icon } from "@/components/ui/icons";
 import { GroveMark } from "@/components/ui/icons";
-import { WORKFLOW_LABELS, agentsFor, getAgent, type AgentId, type AuthMode, type Workflow } from "@/lib/connect-agent/catalog";
+import { AGENTS, WORKFLOW_LABELS, agentsFor, getAgent, type AgentId, type AuthMode, type Workflow } from "@/lib/connect-agent/catalog";
 import { buildPrompt } from "@/lib/connect-agent/guides";
 import { AgentMark } from "./agent-icons";
 import { ConnectionsList } from "./connections-list";
 import { CopyButton } from "./copy-button";
 import { GuideView } from "./guide-view";
-import { useConnections, type ConnectionsData } from "./use-connections";
+import { useConnections, type Connections, type ConnectionsData } from "./use-connections";
 import styles from "./connect-agent.module.css";
 
 export type InitialState = { agent?: AgentId; mode?: AuthMode; filter?: Workflow | "all"; token?: string };
@@ -46,6 +46,27 @@ function Body({ fixture, initial }: { fixture?: ConnectionsData; initial?: Initi
     </>}
     <ConnectionsList connections={connections} />
   </>;
+}
+
+/**
+ * In-page variant for orientation step 6: no dialog chrome, no filters or connection list. A plain
+ * list of agents; choosing one shows its guide in place. The caller owns `connections` (and polls).
+ */
+export function ConnectAgentEmbedded({ connections, initialAgent, initialMode, initialToken }: { connections: Connections; initialAgent?: AgentId; initialMode?: AuthMode; initialToken?: string }) {
+  const [agentId, setAgentId] = useState<AgentId | null>(getAgent(initialAgent)?.id ?? null);
+  const hydrated = useSyncExternalStore(noop, () => true, () => false);
+  const fallbackUrl = hydrated ? `${window.location.origin}/mcp` : "";
+  const serverUrl = connections.state.data?.serverUrl || fallbackUrl;
+  if (agentId) return <div className={styles.embedded}><GuideView key={agentId} agentId={agentId} serverUrl={serverUrl} connections={connections} onBack={() => setAgentId(null)} initialMode={initialMode} initialToken={initialToken} /></div>;
+  return <div className={styles.embedded}>
+    <ul className={styles.agentList} aria-label="Agents">{AGENTS.map(agent => <li key={agent.id}>
+      <button type="button" className={styles.agentRow} onClick={() => setAgentId(agent.id)}>
+        <AgentMark id={agent.id} />
+        <span className={styles.agentText}><span className={styles.agentName}>{agent.name}</span><span className={styles.agentMeta}>{agent.workflows.map(workflow => WORKFLOW_LABELS[workflow]).join(", ")} · {agent.auth === "token" ? "Access token" : agent.auth === "oauth" ? "OAuth" : "OAuth or token"}</span></span>
+        <Icon name="chevron-right" />
+      </button>
+    </li>)}</ul>
+  </div>;
 }
 
 /** Native <dialog>: focus trap, Esc and inert background come from the browser. */

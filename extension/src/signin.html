@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sign in to Canvas · Grove</title>
+  <link rel="stylesheet" href="tokens.css">
+  <link rel="stylesheet" href="pages.css">
+</head>
+<body>
+  <div class="page">
+    <header class="top">
+      <span class="grove-mark" aria-hidden="true"><i></i><i></i><i></i></span>
+      <strong class="title">Grove for Canvas</strong>
+    </header>
+
+    <main aria-live="polite">
+      <section data-view="loading" aria-label="Loading">
+        <div class="skeleton wide"></div><div class="skeleton"></div><div class="skeleton short"></div>
+      </section>
+
+      <section data-view="ready" class="view" hidden>
+        <h1 id="ready-title" tabindex="-1">Sign in to Canvas</h1>
+        <p class="lede">You sign in on Canvas in this tab, the same way you always do. Once Canvas confirms you, Grove saves that session and this tab closes by itself.</p>
+        <dl class="facts">
+          <div><dt>Canvas site</dt><dd class="mono" id="host"></dd></div>
+          <div><dt>Grove reads</dt><dd>Cookies for <span class="mono" id="host-2"></span> only</dd></div>
+          <div><dt>Never read</dt><dd>Your password, your school login cookies, other sites</dd></div>
+        </dl>
+        <p id="error" class="note danger" role="alert" hidden></p>
+        <div class="cta">
+          <button id="continue" class="button primary large" type="button">Continue to Canvas</button>
+          <button id="cancel" class="button quiet large" type="button">Cancel</button>
+        </div>
+        <p id="access-help" class="helper" hidden>Chrome will ask once to allow access to <span class="mono" id="host-3"></span>. That access covers this one site.</p>
+        <p class="helper">A Grove panel stays beside the page while you sign in.</p>
+      </section>
+
+      <section data-view="ended" class="view" hidden>
+        <h1 id="ended-title" tabindex="-1">This sign-in has ended</h1>
+        <p id="ended-text">Start sign-in again from Grove.</p>
+        <div class="cta"><button id="close" class="button secondary large" type="button">Close tab</button></div>
+      </section>
+    </main>
+  </div>
+  <script type="module" src="signin.js"></script>
+</body>
+</html>

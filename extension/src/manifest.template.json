@@ -1,16 +1,16 @@
 {
   "manifest_version": 3,
   "name": "Grove for Canvas",
-  "version": "0.3.2",
+  "version": "0.4.0",
+  "minimum_chrome_version": "116",
   "description": "Connects Canvas Grove through the Canvas session you explicitly approve in your own browser.",
   "icons": { "16": "icons/16.png", "32": "icons/32.png", "48": "icons/48.png", "128": "icons/128.png" },
-  "permissions": ["cookies", "storage"],
+  "permissions": ["cookies", "storage", "sidePanel", "webRequest", "scripting"],
   "host_permissions": ["__GROVE_PATTERN__"],
   "optional_host_permissions": ["https://*/*"],
   "background": { "service_worker": "background.js", "type": "module" },
   "content_scripts": [
-    { "matches": ["__GROVE_PATTERN__"], "js": ["links.js"], "run_at": "document_idle" },
-    { "matches": ["__GROVE_CONNECT_PATTERN__"], "js": ["bridge.js"], "run_at": "document_start" }
+    { "matches": ["__GROVE_PATTERN__"], "js": ["content.js"], "run_at": "document_start" }
   ],
   "action": {
     "default_title": "Grove for Canvas",

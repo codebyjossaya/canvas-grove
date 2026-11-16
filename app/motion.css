@@ -72,15 +72,6 @@
 @keyframes cg-spin{to{rotate:360deg}}
 @keyframes cg-ring{from{outline-offset:-2px;outline-color:transparent}}
 @keyframes cg-draw{to{stroke-dashoffset:0}}
-@keyframes cg-orientation-forward{from{opacity:.25;translate:12px 0}}
-@keyframes cg-orientation-backward{from{opacity:.25;translate:-12px 0}}
-@keyframes cg-orientation-orbit{from{opacity:.4;scale:.94;rotate:-4deg}to{opacity:1;scale:1;rotate:0deg}}
-
-/* Orientation is a key moment: direction explains where the next step came from, while the
-   short duration keeps controls immediately reusable. */
-.orientation-step[data-direction="forward"],.orientation-visual[data-direction="forward"] .orientation-note{animation:cg-orientation-forward var(--vt-move) var(--ease-out-expo) backwards}
-.orientation-step[data-direction="backward"],.orientation-visual[data-direction="backward"] .orientation-note{animation:cg-orientation-backward var(--vt-move) var(--ease-out-expo) backwards}
-.orientation-visual .orientation-orbit{animation:cg-orientation-orbit 360ms var(--ease-out-expo) backwards}
 
 /* ---- buttons: layered wash + pointer glow (::before), grown shadow (::after), lift/press on the
    individual transform properties so they compose. Disabled controls never move. ---- */
@@ -194,7 +185,7 @@ a.chip:active,button.chip:active{scale:.94;transition-duration:var(--motion-fast
 .cg-still>*,.cg-still{animation:none!important}
 /* Skeletons wait 120ms (fast loads never flash one) and then fade in as a whole. */
 .cg-skeleton{animation:cg-fade var(--dur-enter) var(--ease-standard) 120ms backwards}
-:is(.landing,.orientation,.boot){animation:cg-fade var(--dur-enter) var(--ease-standard)}
+:is(.landing,.boot){animation:cg-fade var(--dur-enter) var(--ease-standard)}
 
 /* Disclosure for content <details>: opacity only (animating block-size is layout work) (popover-style ones opt out). */
 details:not([class*="moreTabs"])::details-content{opacity:0;transition:opacity var(--motion-base) var(--ease-standard),content-visibility var(--motion-base) allow-discrete}
@@ -228,7 +219,7 @@ details:not([class*="moreTabs"])[open]::details-content{opacity:1}
 /* ---- reduced motion: no travel, no scale/rotate, no glow, no shimmer; content and skeletons keep a
    100ms opacity fade. The :root:root prefix beats the blanket duration reset in globals.css. ---- */
 @media (prefers-reduced-motion:reduce){
-  :root:root :is(.cg-stagger,.app-content>:not(.cg-skeleton))>*,:root:root .cg-skeleton,:root:root :is(.landing,.orientation,.boot){animation:cg-fade 100ms linear backwards!important;animation-delay:0s!important}
+  :root:root :is(.cg-stagger,.app-content>:not(.cg-skeleton))>*,:root:root .cg-skeleton,:root:root :is(.landing,.boot){animation:cg-fade 100ms linear backwards!important;animation-delay:0s!important}
   :root:root .cg-enter{animation:cg-fade 100ms linear backwards!important}
   .button,.button::before,.button::after,.cg-pop,.cg-sheet,.sync-popover{translate:none!important;scale:none!important;rotate:none!important}
   .button::before{display:none}
@@ -236,7 +227,6 @@ details:not([class*="moreTabs"])[open]::details-content{opacity:1}
   .button[aria-busy="true"]::after{animation:none!important}
   .theme-icon,.cg-chevron,.cg-arrow,.cg-switch::after{rotate:none!important;scale:none!important}
   .palette,.more-sheet{animation:cg-fade 100ms linear!important}
-  .orientation-step,.orientation-note,.orientation-orbit{animation:none!important;translate:none!important;scale:none!important;rotate:none!important}
   ::view-transition-group(*),::view-transition-old(*),::view-transition-new(*){animation-duration:0s!important;animation-delay:0s!important}
   details::details-content{transition:none!important}
 }

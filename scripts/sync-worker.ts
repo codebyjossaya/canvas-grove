@@ -3,6 +3,8 @@ import process from "node:process";
 import postgres from "postgres";
 import { backoffMs, deterministicJitterMs, isAssignmentEvent, QUIZ_ATTEMPT_RESYNC_SECONDS, QUIZ_DEADLINE_RESYNC_SECONDS, isQuizHot, syncPolicies, type SyncKind } from "../lib/sync/catalog";
 import { executeCanvasSyncJob } from "../lib/sync/executor";
+import { disabledSyncKinds } from "../lib/scopes/catalog";
+import { storedDataScopes } from "../lib/scopes/settings";
 import type { EncryptedBrowserState, HostedBrowserProvider } from "../lib/bridge/hosted-browser";
 import { SelfHostedChromiumProvider } from "../lib/bridge/providers/self-hosted";
 import { toCanvasLoginPath, type CanvasLoginPath } from "../lib/canvas/institution";
@@ -488,15 +490,23 @@ async function runAuthMonitor(monitor: Monitor) {
   }
 }
 
+/** Sync kinds the owner turned off in Settings > Data & permissions (lib/scopes). Existing rows are kept. */
+async function disabledKinds(tx: postgres.TransactionSql, ownerId: string): Promise<SyncKind[]> {
+  const [pref] = await tx<{ data_scopes: string[] | null }[]>`select data_scopes from user_preferences where owner_id=${ownerId}`;
+  return disabledSyncKinds(storedDataScopes(pref?.data_scopes ?? null));
+}
+
 async function scheduleDue(ownerId: string) {
   await tenant(ownerId, async (tx) => {
+    const off = await disabledKinds(tx, ownerId);
     const due = await tx<{ id: string; canvas_account_id: string; resource_type: SyncKind; interval_seconds: number; priority: number }[]>`
       select id,canvas_account_id,resource_type,interval_seconds,priority from sync_policies
       where owner_id=${ownerId} and status='active' and next_run_at<=now() order by next_run_at for update skip locked`;
     for (const policy of due) {
       const jitterMs = deterministicJitterMs(policy.canvas_account_id, policy.resource_type);
       const dedupe = `${policy.canvas_account_id}:${policy.resource_type}`;
-      await tx`insert into sync_jobs(owner_id,canvas_account_id,policy_id,hosted_session_id,kind,scope,dedupe_key,status,priority,max_attempts,run_after)
+      // A disabled scope keeps its policy row but never enqueues; its schedule still advances.
+      if (!off.includes(policy.resource_type)) await tx`insert into sync_jobs(owner_id,canvas_account_id,policy_id,hosted_session_id,kind,scope,dedupe_key,status,priority,max_attempts,run_after)
         select ${ownerId},${policy.canvas_account_id},${policy.id},s.id,${policy.resource_type},${tx.json({})},${dedupe},'queued',${policy.priority},5,now()
         from hosted_browser_sessions s where s.owner_id=${ownerId} and s.canvas_account_id=${policy.canvas_account_id} and s.status='active'
         order by s.updated_at desc limit 1 on conflict do nothing`;
@@ -511,6 +521,10 @@ export async function claimNext(ownerId: string): Promise<Job | null> {
   return tenant(ownerId, async (tx) => {
     await tx`update sync_jobs set status='queued',lease_owner=null,lease_token_hash=null,lease_expires_at=null,run_after=now(),updated_at=now()
       where owner_id=${ownerId} and status in ('leased','running') and lease_expires_at<now() and attempt<max_attempts`;
+    // Jobs of a disabled scope (from any enqueue path: schedule, manual, quiz/upload follow-ups) are cancelled, never run.
+    const off = await disabledKinds(tx, ownerId);
+    if (off.length) await tx`update sync_jobs set status='cancelled',finished_at=now(),error_code='SCOPE_DISABLED',error_message='This data area is turned off in Settings',updated_at=now()
+      where owner_id=${ownerId} and status='queued' and kind in ${tx(off)}`;
     // A job runs only while its account has an ACTIVE session (captured cookie
     // jar), and is bound to that session at claim time. Jobs for an account
     // whose session needs sign-in wait queued without burning attempts.
@@ -518,7 +532,7 @@ export async function claimNext(ownerId: string): Promise<Job | null> {
       with candidate as (
         select j.id,(select s.id from hosted_browser_sessions s where s.owner_id=j.owner_id and s.canvas_account_id=j.canvas_account_id
             and s.status='active' and s.revoked_at is null order by s.updated_at desc limit 1) session_id
-        from sync_jobs j where j.owner_id=${ownerId} and j.status='queued' and j.run_after<=now()
+        from sync_jobs j where j.owner_id=${ownerId} and j.status='queued' and j.run_after<=now() ${off.length ? tx`and j.kind not in ${tx(off)}` : tx``}
           and not exists(select 1 from sync_jobs active where active.canvas_account_id=j.canvas_account_id and active.status in ('leased','running'))
           and exists(select 1 from hosted_browser_sessions s where s.owner_id=j.owner_id and s.canvas_account_id=j.canvas_account_id and s.status='active' and s.revoked_at is null)
         order by j.priority desc,j.run_after for update of j skip locked limit 1

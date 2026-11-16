@@ -1,51 +1,92 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { EXTENSION_DOWNLOAD_URL, EXTENSION_INSTALL_PATH } from "@/lib/extension/links";
-import { ORIENTATION_STEPS } from "./orientation";
+import { EXTENSION_DOWNLOAD_URL } from "@/lib/extension/links";
+import { ORIENTATION_STEPS, agentConnections, firstBlockedStep, hostOf, missingSteps, newlyConnected, resumeStep, stepIndex, type GateState } from "@/components/orientation/model";
 
-test("orientation is concise, institution-neutral, and covers the site-first extension handoff", () => {
-  assert.equal(ORIENTATION_STEPS.length, 6);
-  const copy = ORIENTATION_STEPS.map((step) => `${step.title} ${step.body} ${step.note}`).join(" ");
-  for (const phrase of ["find your school", "required", "institution password", "multi-factor", "exact Canvas origin", "dedicated Canvas popup", "immediately closes", "background", "browser extension", "revoke"]) assert.match(copy, new RegExp(phrase, "i"));
-  assert.doesNotMatch(copy, /isolated browser|remote browser|GatorLink|Duo|University of Florida|\bUF\b/i);
+const read = (path: string) => readFileSync(new URL(path, import.meta.url), "utf8");
+const steps = ["welcome", "school", "extension", "scopes", "signin", "agent", "done"].map((name) => read(`../orientation/step-${name}.tsx`)).join("\n");
+const shell = read("../orientation/shell.tsx");
+const container = read("../orientation/orientation.tsx");
+const school = { name: "Example University", domain: "example.instructure.com" };
+const none: GateState = { school: null, extensionReady: false, scopesSaved: false, canvasConnected: false, agentConnected: false };
+
+test("orientation v2 has seven steps in the agreed order, only the agent step optional", () => {
+  assert.deepEqual(ORIENTATION_STEPS.map((step) => step.id), ["welcome", "school", "extension", "scopes", "signin", "agent", "done"]);
+  assert.deepEqual(ORIENTATION_STEPS.filter((step) => "optional" in step && step.optional).map((step) => step.id), ["agent"]);
 });
 
-test("orientation progress is semantic and keyboard navigable", () => {
-  const source = readFileSync(new URL("./orientation.tsx", import.meta.url), "utf8");
-  assert.match(source, /<nav[^>]+aria-label="Orientation steps"/);
-  assert.match(source, /<ol>/);
-  assert.match(source, /aria-current=/);
-  for (const key of ["ArrowRight", "ArrowLeft", "Home", "End"]) assert.match(source, new RegExp(key));
-  assert.match(source, /progressButtons\.current\[next\]\?\.focus/);
-  assert.match(source, /heading\.current\?\.focus/);
+test("resume derives the step from real state, first unmet gate wins", () => {
+  assert.equal(resumeStep(none), stepIndex("welcome"));
+  assert.equal(resumeStep({ ...none, school }), stepIndex("extension"));
+  assert.equal(resumeStep({ ...none, school, extensionReady: true }), stepIndex("scopes"));
+  assert.equal(resumeStep({ ...none, school, extensionReady: true, scopesSaved: true }), stepIndex("signin"));
+  assert.equal(resumeStep({ ...none, school, extensionReady: true, scopesSaved: true, canvasConnected: true }), stepIndex("agent"));
+  assert.equal(resumeStep({ school, extensionReady: true, scopesSaved: true, canvasConnected: true, agentConnected: true }), stepIndex("done"));
+  // Gates are ordered: a saved scope does not skip a missing extension.
+  assert.equal(resumeStep({ ...none, school, scopesSaved: true, canvasConnected: true }), stepIndex("extension"));
+  assert.equal(firstBlockedStep({ ...none, school, extensionReady: true }), stepIndex("scopes"));
 });
 
-test("required extension orientation links to the real in-app installation flow", () => {
-  const step = ORIENTATION_STEPS.find((item) => item.eyebrow === "Browser extension");
-  assert.ok(step);
-  assert.ok("installHref" in step);
-  assert.equal(step.installHref, EXTENSION_INSTALL_PATH);
-  assert.equal(EXTENSION_INSTALL_PATH, "/extension/connect");
-  assert.equal(EXTENSION_DOWNLOAD_URL, "/downloads/grove-for-canvas-0.3.2.zip");
-  assert.match(`${step.body} ${step.note}`, /required.*latest release.*unzip.*Chrome or Edge/i);
+test("a 409 from the server maps back to the unfinished required steps", () => {
+  assert.deepEqual(missingSteps({ extensionPaired: true, scopesSaved: false, canvasConnected: false, agentConnected: false }), ["scopes", "signin"]);
+  assert.deepEqual(missingSteps(undefined), []);
 });
 
-test("orientation has explicit skip and finish paths", () => {
-  const source = readFileSync(new URL("./orientation.tsx", import.meta.url), "utf8");
-  assert.match(source, /Skip for now/);
-  assert.match(source, /Connect Canvas/);
-  assert.match(source, /Enter dashboard/);
-  assert.match(source, /settingsDestination\(\)/);
-  assert.match(source, /finish\("\/"\)/);
+test("agent detection counts OAuth grants and used tokens that appeared after load", () => {
+  const before = agentConnections({ grants: [], tokens: [{ id: "t1", name: "Unused", lastUsedAt: null }] });
+  assert.equal(before.length, 0);
+  const after = agentConnections({ grants: [{ id: "g1", clientName: "Claude" }], tokens: [{ id: "t1", name: "Unused", lastUsedAt: null }] });
+  assert.equal(newlyConnected(before.map((item) => item.key), after)?.name, "Claude");
+  assert.equal(newlyConnected(after.map((item) => item.key), after), null);
+  assert.equal(newlyConnected(null, after), null);
 });
 
-test("school selection happens on the site before extension setup and pre-fills Settings", () => {
-  const source = readFileSync(new URL("./orientation.tsx", import.meta.url), "utf8");
+test("hosts are shown without scheme or path", () => {
+  assert.equal(hostOf("https://ufl.instructure.com/login"), "ufl.instructure.com");
+  assert.equal(hostOf("canvas.fsu.edu"), "canvas.fsu.edu");
+  assert.equal(hostOf(null), "");
+});
+
+test("orientation is unskippable apart from the agent step, and has no decorative orbit", () => {
+  assert.doesNotMatch(`${steps}${shell}${container}`, /Skip for now|orientation-orbit|Enter dashboard/);
+  assert.match(steps, /Set up later/);
+  assert.match(container, /\/api\/onboarding/);
+  assert.match(container, /status === 409/);
+});
+
+test("progress is a semantic, keyboard-navigable status with focus moving to the step heading", () => {
+  assert.match(shell, /<nav[^>]+aria-label="Orientation steps"/);
+  assert.match(shell, /aria-current=\{current \? "step"/);
+  assert.match(shell, /Step \{step \+ 1\} of \{STEP_COUNT\}/);
+  for (const key of ["ArrowDown", "ArrowUp", "Home", "End"]) assert.match(shell, new RegExp(key));
+  assert.match(shell, /buttons\.current\[next\]\?\.focus/);
+  assert.match(shell, /querySelector<HTMLHeadingElement>\("h1"\)\?\.focus/);
+  assert.match(shell, /disabled=\{index > reachable\}/);
+});
+
+test("school search keeps the debounced combobox", () => {
+  const source = read("../orientation/step-school.tsx");
   assert.match(source, /\/api\/canvas\/institutions\/search\?q=/);
-  assert.match(source, /canvasSchoolName/);
-  assert.match(source, /canvasSchoolDomain/);
-  assert.match(source, /step === 1 && !selectedSchool/);
-  assert.match(source, /target="_blank"/);
-  assert.match(source, /rel="noopener noreferrer"/);
+  assert.match(source, /role="combobox"/);
+  assert.match(source, /aria-activedescendant/);
+  assert.match(source, /SEARCH_DEBOUNCE_MS/);
+});
+
+test("step copy has no filler, exclamation marks or generic errors", () => {
+  // JSX text only: runs between tags that contain no code punctuation.
+  const strings = steps.match(/>[^<>{}=;&|]{12,}</g)?.join(" ") ?? "";
+  assert.doesNotMatch(strings, /!|Seamless|Unlock|Let's get|Something went wrong/i);
+});
+
+test("the extension step pins the current download", () => {
+  assert.equal(EXTENSION_DOWNLOAD_URL, "/downloads/grove-for-canvas-0.4.0.zip");
+});
+
+test("orientation styles moved out of the global stylesheets", () => {
+  for (const file of ["../../app/globals.css", "../../app/motion.css", "../../app/theme.css"]) {
+    const css = read(file).replace(/\/\*[\s\S]*?\*\//g, "");
+    assert.doesNotMatch(css, /\.orientation[\w-]*/, file);
+    assert.doesNotMatch(css, /\.orientation-school|cg-orientation/, file);
+  }
 });

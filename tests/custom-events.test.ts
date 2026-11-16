@@ -108,5 +108,5 @@ test("custom events migration: forced row-level security with the tenant policy"
   assert.match(sql, /CREATE POLICY tenant_isolation ON "custom_events" USING \(owner_id = nullif\(current_setting\('app\.user_id', true\), ''\)::uuid\) WITH CHECK \(owner_id = nullif\(current_setting\('app\.user_id', true\), ''\)::uuid\)/);
   assert.match(sql, /ON DELETE SET NULL \("course_id"\)/, "dropping a course never deletes or orphans the owner of an event");
   const journal = JSON.parse(readFileSync("drizzle/meta/_journal.json", "utf8")) as { entries: Array<{ tag: string }> };
-  assert.equal(journal.entries.at(-1)?.tag, "0015_custom_events");
+  assert.ok(journal.entries.some(entry => entry.tag === "0015_custom_events"), "the custom events migration is in the journal");
 });

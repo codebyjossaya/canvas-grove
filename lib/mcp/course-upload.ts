@@ -8,6 +8,8 @@ import { uploadCourseDocument } from "@/lib/courses/upload";
 import { canPropose } from "./categories";
 import { StageError, stageAction, type ActionRow, type ExecResult, type Executor, type StageOutcome } from "./actions";
 import type { BearerAuth } from "./store";
+import { ScopeDisabledError } from "@/lib/scopes/settings";
+import { assertToolScope } from "@/lib/scopes/store";
 
 const WRITE = { readOnlyHint: false, openWorldHint: true, destructiveHint: false, idempotentHint: false } as const;
 const IDEM = z.string().regex(/^[A-Za-z0-9._:-]{8,64}$/).optional().describe("Optional key; repeating it returns the same staged action");
@@ -69,9 +71,9 @@ export function registerCourseUploadTool(server: McpServer, auth: BearerAuth, ex
     inputSchema: uploadCourseDocumentArgs, annotations: WRITE,
   }, async (args): Promise<CallToolResult> => {
     const started = Date.now(); let status = "ok";
-    try { return ok(stageResult(await stageCourseUpload(auth, args, executor))); }
+    try { await assertToolScope(auth.ctx.ownerId, "upload_course_document"); return ok(stageResult(await stageCourseUpload(auth, args, executor))); }
     catch (error) {
-      if (error instanceof CourseUploadError || error instanceof StageError) { status = error.code; return fail(error.code, error.message); }
+      if (error instanceof ScopeDisabledError || error instanceof CourseUploadError || error instanceof StageError) { status = error.code; return fail(error.code, error.message); }
       status = "error"; return fail("TOOL_FAILED", "Grove could not stage this upload right now.");
     } finally { console.info(JSON.stringify({ event: "mcp_tool", tool: "upload_course_document", ownerId: auth.ctx.ownerId, status, ms: Date.now() - started })); }
   });

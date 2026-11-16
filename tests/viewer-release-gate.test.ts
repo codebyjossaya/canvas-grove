@@ -2,21 +2,32 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync } from "node:fs";
 
+// Settings → Canvas connection. Sign-in runs in the user's own browser through the Grove extension;
+// the card renders useCanvasSignIn state and never embeds or pops up a credential page itself.
 const source = readFileSync("components/ui/canvas-session.tsx", "utf8");
+const hook = readFileSync("lib/extension/use-canvas-signin.ts", "utf8");
 
-test("secure viewer uses a dedicated named popup instead of an embedded side viewer", () => {
-  assert.match(source, /window\.open\(/, "direct user action must open a dedicated popup");
-  assert.match(source, /\.focus\(\)/, "an existing named popup must be reused and focused");
-  assert.doesNotMatch(source, /<iframe|embedded-viewer/, "credential entry must not be embedded in the application page");
+test("the card never embeds or opens a credential page itself", () => {
+  assert.doesNotMatch(source, /<iframe|embedded-viewer|window\.open\(/);
+  assert.match(source, /useCanvasSignIn\(/);
+  assert.match(source, /useExtension\(/);
 });
 
-test("viewer lifecycle explicitly handles blocked and closed popups", () => {
-  assert.match(source, /popup[\s\S]{0,80}(blocked|null)|blocked[\s\S]{0,80}popup/i);
-  assert.match(source, /\.closed/);
-  assert.match(source, /Cancel &amp; revoke session|Disconnect &amp; delete session/);
+test("the page no longer drives extension capture; the extension reports progress by itself", () => {
+  assert.doesNotMatch(source + hook, /canvas-auth-(check|capture|open)/);
+  assert.match(hook, /"signin-start"/);
 });
 
-test("viewer retains automatic completion detection and actionable failures", () => {
-  assert.match(source, /startPolling/);
-  assert.match(source, /BROWSER_(?:HOST_OFFLINE|UNRESPONSIVE|STARTING|AUTH_EXPIRED)/);
+test("connected is decided by the server, not by extension messages", () => {
+  assert.match(hook, /\/api\/canvas\/sessions\/\$\{encodeURIComponent\(session\.id\)\}`/);
+  assert.match(hook, /server\.state === "active"[\s\S]{0,80}phase: "connected"/);
+});
+
+test("one primary action with consent, plus disconnect and waiting-state recovery", () => {
+  assert.match(source, /Sign in with Canvas/);
+  assert.doesNotMatch(source, /Review browser sign-in/);
+  assert.match(source, /type="checkbox"/);
+  assert.match(source, /Reopen sign-in tab/);
+  assert.match(source, /Not seeing the tab\?/);
+  assert.match(source, /Disconnect Canvas/);
 });

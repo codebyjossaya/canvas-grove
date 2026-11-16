@@ -150,8 +150,6 @@ html, body { background: var(--surface-page); color: var(--text-primary); }
 .secondary, .favorite-control button { background: var(--surface-raised); color: var(--text-primary); }
 .button:disabled, button:disabled, input:disabled, select:disabled, textarea:disabled { cursor: not-allowed; opacity: .56; }
 
-.orientation-visual { border-right: 1px solid color-mix(in srgb, currentColor 13%, transparent); }
-
 .session-error, .error-notice, .host-notice.offline, .host-notice.capacity, .sync-health.auth-expired, .sync-health.error { background: var(--status-danger-soft); border-color: var(--status-danger-border); }
 .host-notice.starting, .sync-health.stale { background: var(--status-warning-soft); border-color: var(--status-warning-border); }
 .connection-success, .record-status.completed, .freshness-badge.fresh { background: var(--status-success-soft); border-color: var(--status-success-border); }

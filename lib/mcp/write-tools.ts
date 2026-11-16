@@ -14,6 +14,8 @@ import { formatQuizQuestions } from "./quiz-format";
 import { fromNativeBundle, isOneQuestionAtATime, readCurrentAttempt } from "./quiz-read";
 import { BULK_MAX_ENTRIES, bulkSummary, planBulkAnswers, runBulkSave } from "./quiz-bulk";
 import type { BearerAuth } from "./store";
+import { blockedScopeForTool, redactForScopes, SCOPE_DISABLED, scopeDisabledMessage } from "@/lib/scopes/settings";
+import { enabledDataScopes } from "@/lib/scopes/store";
 
 // Phase-2 tools. Writes are staged for approval in Grove unless the connection's auto mode covers
 // them; planner tools are Grove-local and immediate. Quizzes: approval at ENTRY only, with
@@ -36,7 +38,13 @@ function wrap(name: string, auth: BearerAuth, work: () => Promise<Data>) {
   return async (): Promise<CallToolResult> => {
     const started = Date.now();
     let status = "ok";
-    try { return ok(await work()); }
+    try {
+      // Data areas turned off in Settings > Data & permissions block their tools (read per call).
+      const enabled = await enabledDataScopes(auth.ctx.ownerId);
+      const blocked = blockedScopeForTool(name, enabled);
+      if (blocked) { status = SCOPE_DISABLED; return err(SCOPE_DISABLED, scopeDisabledMessage(blocked)); }
+      return ok(redactForScopes(await work(), enabled));
+    }
     catch (error) {
       if (error instanceof ToolError || error instanceof StageError || error instanceof QuizServiceError) { status = error.code; return err(error.code, error.message); }
       status = "error";

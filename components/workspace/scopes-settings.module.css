@@ -1,0 +1,56 @@
+/* Settings > Data & permissions. Tokens only (app/theme.css, app/globals.css); radius 6/10 via
+   --radius-sm / --radius-md; borders and surface tone for hierarchy, no shadows. */
+.lead{margin:0;color:var(--text-secondary);font-size:var(--fs-base);line-height:1.5}
+.muted{margin:0;color:var(--text-muted);font-size:var(--fs-sm);line-height:1.5}
+.error{margin:0;color:var(--status-danger);font-size:var(--fs-sm);line-height:1.5}
+.problem{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-3);margin-top:var(--space-4);padding:var(--space-3) var(--space-4);border:1px solid var(--status-danger-border);border-radius:var(--radius-md);background:var(--status-danger-soft)}
+.problem p{margin:0;flex:1 1 240px;color:var(--text-primary);font-size:var(--fs-sm);line-height:1.5}
+
+.form{display:grid;gap:var(--space-6);margin-top:var(--space-6)}
+.group{display:grid;gap:var(--space-3);min-width:0;margin:0;padding:0;border:0}
+.legend{padding:0;margin-bottom:var(--space-3);color:var(--text-primary);font-size:var(--fs-base);font-weight:600}
+
+.list{display:grid;margin:0;padding:0;list-style:none;border:1px solid var(--border-subtle);border-radius:var(--radius-md)}
+.row{display:grid;grid-template-columns:auto minmax(0,1fr);gap:var(--space-3);align-items:start;padding:var(--space-3) var(--space-4)}
+.row+.row{border-top:1px solid var(--border-subtle)}
+.check{width:16px;height:16px;margin:2px 0 0;accent-color:var(--accent-primary)}
+.check:focus-visible{outline:2px solid var(--focus-ring);outline-offset:2px}
+.check:disabled{opacity:1}
+.text{display:grid;gap:var(--space-1);min-width:0}
+.label{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-2);color:var(--text-primary);font-size:var(--fs-base);font-weight:500;line-height:1.4;cursor:pointer}
+.check:disabled+.text .label{cursor:default}
+.description{margin:0;color:var(--text-secondary);font-size:var(--fs-sm);line-height:1.5}
+
+/* Status tags: required (neutral), read vs act visually distinct. */
+.required,.readTag,.act{display:inline-flex;align-items:center;height:20px;padding:0 var(--space-2);border-radius:var(--radius-sm);font-size:var(--fs-xs);font-weight:500;line-height:1}
+.required{border:1px solid var(--border-strong);color:var(--text-muted)}
+.readTag{background:var(--surface-muted);color:var(--text-secondary)}
+.act{background:var(--status-warning-soft);color:var(--status-warning)}
+
+.details{color:var(--text-muted);font-size:var(--fs-sm);line-height:1.5}
+.details summary{width:max-content;color:var(--accent-text);font-size:var(--fs-xs);font-weight:500;cursor:pointer;border-radius:var(--radius-sm)}
+.details summary:focus-visible{outline:2px solid var(--focus-ring);outline-offset:2px}
+.details p{margin:var(--space-1) 0 0}
+
+.note{margin:0;color:var(--text-muted);font-size:var(--fs-sm);line-height:1.5}
+.warning{margin:0;padding:var(--space-2) var(--space-3);border:1px solid var(--status-warning-border);border-radius:var(--radius-sm);background:var(--status-warning-soft);color:var(--text-primary);font-size:var(--fs-sm);line-height:1.5}
+
+.never{padding:var(--space-3) var(--space-4);border-radius:var(--radius-md);background:var(--surface-subtle)}
+.neverTitle{margin:0 0 var(--space-1);color:var(--text-primary);font-size:var(--fs-sm);font-weight:600}
+.never ul{margin:0;padding-left:var(--space-4);color:var(--text-secondary);font-size:var(--fs-sm);line-height:1.6}
+
+.sub{display:grid;gap:var(--space-2);padding-left:var(--space-4);border-left:2px solid var(--border-subtle)}
+.subTitle{margin:0;color:var(--text-primary);font-size:var(--fs-sm);font-weight:600}
+
+.footer{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-3);padding-top:var(--space-4);border-top:1px solid var(--border-subtle)}
+.footer p{flex:1 1 220px}
+
+@media(max-width:600px){
+  .row{padding:var(--space-3)}
+  .footer{flex-direction:column;align-items:stretch}
+  .footer :global(.button){width:100%;min-height:44px}
+}
+@media(prefers-reduced-motion:no-preference){
+  .warning{animation:scopes-in var(--motion-fast) var(--ease-standard)}
+}
+@keyframes scopes-in{from{opacity:0;transform:translateY(-2px)}to{opacity:1;transform:none}}

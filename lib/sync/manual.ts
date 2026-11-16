@@ -1,7 +1,10 @@
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { withTenantTransaction } from "@/lib/db";
 import type { AuthContext } from "@/lib/db/auth-context";
-import { canvasAccounts, hostedBrowserSessions, syncJobs, syncPolicies } from "@/lib/db/schema";
+import { canvasAccounts, hostedBrowserSessions, syncJobs, syncPolicies, userPreferences } from "@/lib/db/schema";
+import { isSyncKindAllowed } from "@/lib/scopes/catalog";
+import { storedDataScopes } from "@/lib/scopes/settings";
+import type { SyncKind } from "./catalog";
 
 export async function enqueueManualSync(ctx: AuthContext) {
   return withTenantTransaction(ctx.ownerId, async (tx) => {
@@ -12,9 +15,13 @@ export async function enqueueManualSync(ctx: AuthContext) {
       .where(and(eq(hostedBrowserSessions.ownerId, ctx.ownerId), eq(hostedBrowserSessions.canvasAccountId, account.id), eq(hostedBrowserSessions.status, "active")))
       .orderBy(desc(hostedBrowserSessions.updatedAt)).limit(1);
     if (!session) return { state: "auth-required" as const, jobIds: [], queued: 0, deduped: 0 };
-    const policies = await tx.select({ id: syncPolicies.id, kind: syncPolicies.resourceType, priority: syncPolicies.priority })
+    const allPolicies = await tx.select({ id: syncPolicies.id, kind: syncPolicies.resourceType, priority: syncPolicies.priority })
       .from(syncPolicies).where(and(eq(syncPolicies.ownerId, ctx.ownerId), eq(syncPolicies.canvasAccountId, account.id), eq(syncPolicies.status, "active")));
-    if (!policies.length) return { state: "not-initialized" as const, jobIds: [], queued: 0, deduped: 0 };
+    if (!allPolicies.length) return { state: "not-initialized" as const, jobIds: [], queued: 0, deduped: 0 };
+    // Skip data areas the user turned off (Settings > Data & permissions).
+    const [pref] = await tx.select({ dataScopes: userPreferences.dataScopes }).from(userPreferences).where(eq(userPreferences.ownerId, ctx.ownerId)).limit(1);
+    const enabled = storedDataScopes(pref?.dataScopes ?? null);
+    const policies = allPolicies.filter((policy) => isSyncKindAllowed(policy.kind as SyncKind, enabled));
     const inserted: string[] = [];
     for (const policy of policies) {
       const rows = await tx.insert(syncJobs).values({ ownerId: ctx.ownerId, canvasAccountId: account.id, hostedSessionId: session.id,

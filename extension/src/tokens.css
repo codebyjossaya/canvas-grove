@@ -1,0 +1,95 @@
+/* Canvas Grove tokens, copied from the app's theme.css (light + dark), so extension pages match the site.
+   Shared by the popup, the sign-in interstitial and the side panel.
+   Scales: type 12/13/14/16/20/28, weight 400/500/600, space 4/8/12/16/24/32/48, radius 6/10. */
+@font-face{font-family:"Inter";font-style:normal;font-weight:100 900;font-display:block;src:url("fonts/inter-latin-var.woff2") format("woff2")}
+:root{
+  color-scheme:light;
+  --surface-page:#f6f6f7;--surface-raised:#ffffff;--surface-muted:#e9e9ec;--surface-hover:#f1f1f3;--surface-sunken:#f9f9fa;
+  --border-subtle:#e3e3e7;--border-strong:#cdcdd4;
+  --text-primary:#17171c;--text-secondary:#3d3d47;--text-muted:#5f5f6b;--text-faint:#8a8a96;
+  --accent-primary:#4b4fd6;--accent-primary-hover:#3f43c4;--accent-on-primary:#ffffff;--accent-soft:#ececfd;--accent-text:#4044c8;
+  --status-success:#1d6f3c;--status-success-soft:#e6f4eb;--status-warning:#87510a;--status-warning-soft:#fbf0dc;
+  --status-danger:#b02a1f;--status-danger-soft:#fdecea;--status-info:#2f55b0;--status-info-soft:#e9eefb;
+  --focus-ring:#4b4fd6;--skeleton-base:#ececef;--skeleton-shine:#f7f7f8;
+  --shadow-soft:0 1px 2px rgba(17,17,22,.05);
+  --font-sans:"Inter",ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --font-mono:ui-monospace,"SF Mono","Cascadia Mono",Menlo,Consolas,monospace;
+  --radius-sm:6px;--radius-lg:10px;--radius-full:999px;
+  --space-1:4px;--space-2:8px;--space-3:12px;--space-4:16px;--space-5:24px;--space-6:32px;--space-7:48px;
+  --text-12:12px;--text-13:13px;--text-14:14px;--text-16:16px;--text-20:20px;--text-28:28px;
+  --motion:160ms;
+}
+@media (prefers-color-scheme:dark){:root{
+  color-scheme:dark;
+  --surface-page:#0e0e11;--surface-raised:#141418;--surface-muted:#222228;--surface-hover:#1c1c21;--surface-sunken:#111114;
+  --border-subtle:#26262d;--border-strong:#383841;
+  --text-primary:#ededf0;--text-secondary:#c3c3cb;--text-muted:#9a9aa6;--text-faint:#6f6f7b;
+  --accent-primary:#8e92ff;--accent-primary-hover:#a3a6ff;--accent-on-primary:#0e0e11;--accent-soft:#23244a;--accent-text:#a7aaff;
+  --status-success:#6fd394;--status-success-soft:#112a1b;--status-warning:#efc06a;--status-warning-soft:#2c2210;
+  --status-danger:#ff8f84;--status-danger-soft:#331715;--status-info:#9db8ff;--status-info-soft:#16203a;
+  --focus-ring:#a3a6ff;--skeleton-base:#1d1d22;--skeleton-shine:#26262d;
+  --shadow-soft:0 1px 2px rgba(0,0,0,.4);
+}}
+
+*{box-sizing:border-box}
+html{background:var(--surface-page)}
+body{margin:0;background:var(--surface-page);color:var(--text-primary);font-family:var(--font-sans);font-size:var(--text-14);line-height:1.5;font-feature-settings:"cv11","ss03";-webkit-font-smoothing:antialiased;overflow-x:hidden}
+h1,h2{margin:0;font-weight:600;letter-spacing:-.011em}
+p{margin:0;overflow-wrap:anywhere}
+button{font:inherit;color:inherit;cursor:pointer}
+:focus-visible{outline:2px solid var(--focus-ring);outline-offset:2px}
+/* Headings receive focus programmatically on view change (for screen readers); no ring for that. */
+[tabindex="-1"]:focus{outline:none}
+[hidden]{display:none !important}
+.mono{font-family:var(--font-mono);font-size:.92em;letter-spacing:0}
+
+/* Brand row */
+.top{display:flex;align-items:center;gap:var(--space-2);min-height:24px}
+.title{flex:1;min-width:0;font-size:var(--text-14);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* Grove mark, same construction as the website's sidebar brand. */
+.grove-mark{position:relative;width:20px;height:20px;flex:none;display:inline-block;border-radius:var(--radius-sm);background:var(--accent-primary)}
+.grove-mark i{position:absolute;width:6px;height:6px;border-radius:2px;background:var(--accent-on-primary)}
+.grove-mark i:nth-child(1){left:4px;top:4px}
+.grove-mark i:nth-child(2){right:4px;top:4px;opacity:.7}
+.grove-mark i:nth-child(3){left:4px;bottom:4px;opacity:.7}
+.grove-mark::after{content:"";position:absolute;right:4px;bottom:4px;width:6px;height:6px;border-radius:2px;background:var(--accent-on-primary);opacity:.4}
+
+.chip{display:inline-flex;align-items:center;height:20px;padding:0 var(--space-2);border-radius:var(--radius-full);background:var(--surface-muted);color:var(--text-secondary);font-size:var(--text-12);font-weight:500;white-space:nowrap}
+.chip.success{background:var(--status-success-soft);color:var(--status-success)}
+.chip.warning{background:var(--status-warning-soft);color:var(--status-warning)}
+.chip.danger{background:var(--status-danger-soft);color:var(--status-danger)}
+.chip.info{background:var(--status-info-soft);color:var(--status-info)}
+
+.button{min-height:32px;padding:0 var(--space-3);border:1px solid transparent;border-radius:var(--radius-sm);display:inline-flex;align-items:center;justify-content:center;gap:var(--space-2);font-weight:500;font-size:var(--text-13);line-height:1.2;text-align:center;background:none;white-space:normal;min-width:0;overflow-wrap:anywhere;transition:background-color var(--motion),border-color var(--motion),transform var(--motion)}
+.button.large{min-height:40px;padding:0 var(--space-4);font-size:var(--text-14)}
+.button.block{width:100%}
+.button.primary{background:var(--accent-primary);color:var(--accent-on-primary)}
+.button.primary:hover:not(:disabled){background:var(--accent-primary-hover)}
+.button.secondary{border-color:var(--border-strong);background:var(--surface-raised);color:var(--text-primary);box-shadow:var(--shadow-soft)}
+.button.secondary:hover:not(:disabled){background:var(--surface-hover)}
+.button.quiet{color:var(--text-muted)}
+.button.quiet:hover:not(:disabled){background:var(--surface-hover);color:var(--text-primary)}
+.button:active:not(:disabled){transform:scale(.98)}
+.button:disabled{opacity:.6;cursor:default}
+.danger-button{border:0;background:none;padding:var(--space-2) 0;color:var(--status-danger);font-weight:500;font-size:var(--text-12)}
+.danger-button:hover{text-decoration:underline;text-underline-offset:3px}
+
+.note{padding:var(--space-2) var(--space-3);border-radius:var(--radius-sm);border:1px solid transparent;background:var(--status-warning-soft);color:var(--status-warning);font-size:var(--text-13);font-weight:500}
+.note.info{background:var(--status-info-soft);color:var(--status-info)}
+.note.danger{background:var(--status-danger-soft);color:var(--status-danger)}
+.note.success{background:var(--status-success-soft);color:var(--status-success)}
+
+.skeleton{height:14px;margin:0 0 var(--space-3);border-radius:var(--radius-sm);background:var(--skeleton-base)}
+.skeleton.wide{height:22px;width:70%}.skeleton.short{width:45%}
+
+/* A calm "watching" indicator: a dot whose ring fades in and out. No fake progress. */
+.watch{position:relative;flex:none;width:8px;height:8px;margin-top:6px;border-radius:var(--radius-full);background:var(--accent-primary)}
+.watch::after{content:"";position:absolute;inset:-4px;border-radius:inherit;border:1px solid var(--accent-primary);opacity:0;animation:watch 1.8s ease-in-out infinite}
+.watch.done{background:var(--status-success)}
+.watch.done::after,.watch.stopped::after{animation:none}
+.watch.stopped{background:var(--status-danger)}
+@keyframes watch{50%{opacity:.5;transform:scale(1.15)}}
+
+.view{animation:enter var(--motion) ease-out}
+@keyframes enter{from{opacity:0;transform:translateY(2px)}}
+@media (prefers-reduced-motion:reduce){.watch::after,.view{animation:none}.button{transition:none}}

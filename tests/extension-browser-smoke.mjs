@@ -33,15 +33,15 @@ try {
     const requestId = crypto.randomUUID();
     const timer = setTimeout(() => reject(new Error("extension bridge timed out")), 5_000);
     const receive = (event) => {
-      if (event.source !== window || event.origin !== window.location.origin || event.data?.source !== "grove-extension" || event.data?.type !== "canvas-auth-result" || event.data?.requestId !== requestId) return;
+      if (event.source !== window || event.origin !== window.location.origin || event.data?.source !== "grove-extension" || event.data?.type !== "reply" || event.data?.requestId !== requestId) return;
       clearTimeout(timer);
       window.removeEventListener("message", receive);
       resolveState(event.data.result);
     };
     window.addEventListener("message", receive);
-    window.postMessage({ source: "grove-web", type: "canvas-auth-state", requestId }, window.location.origin);
+    window.postMessage({ source: "grove-web", type: "hello", requestId }, window.location.origin);
   }));
-  assert.deepEqual(state, { ok: true, installed: true, paired: false, canvasOrigin: null });
+  assert.deepEqual(state, { installed: true, protocol: 2, version: "0.4.0", paired: false, deviceName: null, canvasOrigin: null, hasCanvasAccess: false, signin: null });
   console.log(JSON.stringify({ ok: true, extensionId, groveOrigin: GROVE_ORIGIN, bridge: state }));
 } finally {
   if (browser) await browser.close();

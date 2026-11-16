@@ -3,6 +3,8 @@ import { MCP_LIMITS, limit } from "@/lib/mcp/limits";
 import { patExpiryDays } from "@/lib/mcp/oauth-policy";
 import { TokenLimitError, createPat } from "@/lib/mcp/store";
 import { cleanLabel } from "@/lib/mcp/token";
+import { agentDefaultAllowsActions } from "@/lib/scopes/settings";
+import { getScopeSettings } from "@/lib/scopes/store";
 
 export const instant = false;
 
@@ -18,7 +20,9 @@ export async function POST(request: Request) {
   if (days === undefined) return fail(400, "BAD_EXPIRY", "expiresInDays must be 30, 90, 365 or null.");
   if (body.allowActions !== undefined && typeof body.allowActions !== "boolean") return fail(400, "BAD_REQUEST", "allowActions must be true or false.");
   try {
-    const { token, item } = await createPat(ctx, cleanLabel(body.name, "Access token"), days, body.allowActions === true);
+    // Omitted allowActions = the user's agent default (Settings > Data & permissions); an explicit choice wins.
+    const allowActions = body.allowActions === undefined ? agentDefaultAllowsActions(await getScopeSettings(ctx.ownerId)) : body.allowActions === true;
+    const { token, item } = await createPat(ctx, cleanLabel(body.name, "Access token"), days, allowActions);
     return reply({ token, item }, 201);
   } catch (error) {
     if (error instanceof TokenLimitError) return fail(409, "TOKEN_LIMIT", error.message);

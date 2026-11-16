@@ -1,10 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import type { AgentAccess } from "@/lib/scopes/catalog";
+import { READ_SCOPE, WRITE_SCOPE, type AutoCategory } from "@/lib/mcp/categories";
 
 export type TokenItem = { id: string; name: string; prefix: string; scopes: string[]; createdAt: string; lastUsedAt: string | null; expiresAt: string | null };
 export type GrantItem = { id: string; clientName: string; scopes: string[]; createdAt: string; lastUsedAt: string | null };
-export type ConnectionsData = { serverUrl: string; tokens: TokenItem[]; grants: GrantItem[] };
+/** `defaults` = what a new connection gets unless the user picks otherwise (Settings > Data & permissions). */
+export type ConnectionsData = { serverUrl: string; tokens: TokenItem[]; grants: GrantItem[]; defaults?: { access: AgentAccess; autoCategories: AutoCategory[] } };
 export type ExpiryChoice = 30 | 90 | 365 | null;
 export type CreateResult = { ok: true; token: string; item: TokenItem } | { ok: false; message: string };
 
@@ -21,10 +24,31 @@ async function errorMessage(response: Response, fallback: string): Promise<strin
   } catch { return fallback; }
 }
 
-/** Loads the user's tokens and OAuth grants. With `fixture`, nothing touches the network. */
-export function useConnections(fixture?: ConnectionsData) {
+/**
+ * Loads the user's tokens and OAuth grants. With `fixture`, nothing touches the network.
+ * `pollMs` re-reads the list quietly (no loading state) while the tab is visible, so a surface can
+ * notice a connection made in another app (orientation step 6).
+ */
+export function useConnections(fixture?: ConnectionsData, options?: { pollMs?: number }) {
   const [state, setState] = useState<State>(fixture ? { status: "ready", data: fixture, message: "" } : { status: "loading", data: null, message: "" });
   const [nonce, setNonce] = useState(0);
+  const pollMs = options?.pollMs ?? 0;
+
+  useEffect(() => {
+    if (fixture || pollMs <= 0) return;
+    let live = true;
+    const refresh = () => {
+      if (document.visibilityState !== "visible") return;
+      fetch(`${ENDPOINT}/connections`, { headers: HEADERS, cache: "no-store" })
+        .then(response => response.ok ? response.json() as Promise<ConnectionsData> : null)
+        .then(data => { if (live && data) setState(previous => ({ ...previous, status: previous.status === "error" ? "ready" : previous.status, data, message: previous.status === "error" ? "" : previous.message })); })
+        .catch(() => { /* a missed poll is retried on the next tick */ });
+    };
+    const timer = window.setInterval(refresh, pollMs);
+    document.addEventListener("visibilitychange", refresh);
+    window.addEventListener("focus", refresh);
+    return () => { live = false; window.clearInterval(timer); document.removeEventListener("visibilitychange", refresh); window.removeEventListener("focus", refresh); };
+  }, [fixture, pollMs]);
 
   useEffect(() => {
     if (fixture) return;
@@ -49,15 +73,16 @@ export function useConnections(fixture?: ConnectionsData) {
     return false;
   }, [fixture, state.data]);
 
-  const createToken = useCallback(async (name: string, expiresInDays: ExpiryChoice): Promise<CreateResult> => {
+  /** `allowActions` is always sent: an omitted value would silently fall back to the saved default. */
+  const createToken = useCallback(async (name: string, expiresInDays: ExpiryChoice, allowActions: boolean): Promise<CreateResult> => {
     let result: CreateResult;
     if (fixture) {
       const now = new Date("2026-11-12T12:00:00Z");
-      const item: TokenItem = { id: `fixture-${fixture.tokens.length + 1}`, name, prefix: "gmt1.demo", scopes: ["canvas:read"], createdAt: now.toISOString(), lastUsedAt: null, expiresAt: expiresInDays ? new Date(now.getTime() + expiresInDays * 864e5).toISOString() : null };
+      const item: TokenItem = { id: `fixture-${fixture.tokens.length + 1}`, name, prefix: "gmt1.demo", scopes: allowActions ? [READ_SCOPE, WRITE_SCOPE] : [READ_SCOPE], createdAt: now.toISOString(), lastUsedAt: null, expiresAt: expiresInDays ? new Date(now.getTime() + expiresInDays * 864e5).toISOString() : null };
       result = { ok: true, token: "gmt1.preview-owner.preview-token.EXAMPLE-NOT-A-REAL-TOKEN", item };
     } else {
       try {
-        const response = await fetch(`${ENDPOINT}/tokens`, { method: "POST", headers: { ...HEADERS, "content-type": "application/json" }, body: JSON.stringify({ name, expiresInDays }), cache: "no-store" });
+        const response = await fetch(`${ENDPOINT}/tokens`, { method: "POST", headers: { ...HEADERS, "content-type": "application/json" }, body: JSON.stringify({ name, expiresInDays, allowActions }), cache: "no-store" });
         if (!response.ok) return { ok: false, message: await errorMessage(response, "Could not create the token. Try again.") };
         const body = await response.json() as { token: string; item: TokenItem };
         result = { ok: true, token: body.token, item: body.item };

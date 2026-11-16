@@ -25,16 +25,21 @@ const origin = normalise(requested);
 // Chrome match patterns ignore ports, so http://localhost:3000 becomes http://localhost/*
 const pattern = `${new URL(origin).protocol}//${new URL(origin).hostname}/*`;
 
+export const ENTRIES = [
+  "background.js", "content.js", "cookies.js", "detect.js", "ui.js",
+  "popup.html", "popup.js", "popup.css", "tokens.css", "pages.css",
+  "signin.html", "signin.js", "sidepanel.html", "sidepanel.js",
+  "fonts", "icons",
+];
+
 rmSync(dist, { recursive: true, force: true });
 mkdirSync(dist, { recursive: true });
-for (const entry of ["background.js", "bridge.js", "links.js", "cookies.js", "popup.html", "popup.css", "popup.js", "fonts", "icons"]) {
+for (const entry of ENTRIES) {
   if (!existsSync(join(src, entry))) throw new Error(`missing src/${entry}`);
   cpSync(join(src, entry), join(dist, entry), { recursive: true });
 }
-const manifest = readFileSync(join(src, "manifest.template.json"), "utf8")
-  .replaceAll("__GROVE_CONNECT_PATTERN__", pattern.replace(/\/\*$/, "/extension/connect*"))
-  .replaceAll("__GROVE_PATTERN__", pattern);
+const manifest = readFileSync(join(src, "manifest.template.json"), "utf8").replaceAll("__GROVE_PATTERN__", pattern);
 JSON.parse(manifest);
 writeFileSync(join(dist, "manifest.json"), manifest);
-writeFileSync(join(dist, "config.js"), `export const GROVE_ORIGIN = ${JSON.stringify(origin)};\n`);
+writeFileSync(join(dist, "config.js"), `export const GROVE_ORIGIN = ${JSON.stringify(origin)};\nexport const GROVE_PATTERN = ${JSON.stringify(pattern)};\n`);
 console.log(`built ${dist} for ${origin} (v${JSON.parse(manifest).version})`);

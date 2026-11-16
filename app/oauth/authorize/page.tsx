@@ -9,6 +9,9 @@ import { READ_SCOPE_TEXT, WRITE_SCOPE_TEXT } from "@/lib/mcp/categories";
 import { consentToken, validateAuthorizeRequest } from "@/lib/mcp/authorize";
 import { MCP_LIMITS, limit } from "@/lib/mcp/limits";
 import { publicOrigin } from "@/lib/mcp/origin";
+import { ensureUserForClerk } from "@/lib/db/auth-context";
+import { agentDefaultAllowsActions } from "@/lib/scopes/settings";
+import { getScopeSettings } from "@/lib/scopes/store";
 import { decideConsent } from "./actions";
 import styles from "./consent.module.css";
 
@@ -54,6 +57,9 @@ async function Consent({ searchParams }: { searchParams: Search }) {
   const user = await currentUser();
   const account = user?.primaryEmailAddress?.emailAddress ?? user?.username ?? "your Grove account";
   const host = new URL(request.redirectUri).host;
+  // The user's saved agent default preselects the write option; they can still change it here.
+  const proposeByDefault = request.offerWrite && await ensureUserForClerk(userId)
+    .then((ctx) => getScopeSettings(ctx.ownerId)).then(agentDefaultAllowsActions).catch(() => false);
   const hidden: Record<string, string> = {
     client_id: request.clientId, redirect_uri: request.redirectUri, response_type: "code", code_challenge: request.codeChallenge,
     code_challenge_method: "S256", scope: request.scopes.join(" "), ...(request.resource ? { resource: request.resource } : {}),
@@ -80,7 +86,7 @@ async function Consent({ searchParams }: { searchParams: Search }) {
     <form action={decideConsent} className={styles.form}>
       {Object.entries(hidden).map(([name, value]) => <input key={name} type="hidden" name={name} value={value}/>)}
       {request.offerWrite ? <label className={styles.option}>
-        <input type="checkbox" name="allow_actions" value="1"/>
+        <input type="checkbox" name="allow_actions" value="1" defaultChecked={proposeByDefault}/>
         <span><strong>Also allow proposing actions</strong><span className={styles.fine}>{WRITE_SCOPE_TEXT}</span></span>
       </label> : null}
       <div className={styles.actions}>

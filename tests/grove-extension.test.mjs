@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { hasLiveSession, normalizeOrigin, sameOrigin, toChromeCookie, toServerCookie } from "../extension/src/cookies.js";
+import { isAuthPath, signInSignal } from "../extension/src/detect.js";
 
 const ORIGIN = "https://ufl.instructure.com";
 const NOW = 1_800_000_000;
@@ -67,4 +68,38 @@ test("Canvas host access is optional and requested per exact origin", () => {
   assert.deepEqual(manifest.host_permissions, ["__GROVE_PATTERN__"]);
   assert.deepEqual(manifest.optional_host_permissions, ["https://*/*"]);
   assert.ok(!JSON.stringify(manifest.host_permissions).includes("instructure.com"));
+});
+
+test("manifest 0.4.0 asks only for what the tab + side panel sign-in needs", () => {
+  const manifest = JSON.parse(readFileSync(new URL("../extension/src/manifest.template.json", import.meta.url), "utf8"));
+  assert.equal(manifest.version, "0.4.0");
+  assert.deepEqual(manifest.permissions, ["cookies", "storage", "sidePanel", "webRequest", "scripting"]);
+  assert.ok(!manifest.permissions.includes("tabs"), "tab placement and URL watching work without the tabs permission");
+  assert.equal("side_panel" in manifest, false, "the panel is enabled per sign-in tab, never by default");
+  assert.deepEqual(manifest.content_scripts, [{ matches: ["__GROVE_PATTERN__"], js: ["content.js"], run_at: "document_start" }]);
+});
+
+test("the old popup-window sign-in is gone", () => {
+  const background = readFileSync(new URL("../extension/src/background.js", import.meta.url), "utf8");
+  assert.ok(!background.includes("windows.create"));
+  assert.ok(!background.includes("canvas-auth-open"));
+});
+
+test("sign-in signals: Canvas pages outside login, Canvas API calls and session Set-Cookie headers", () => {
+  const page = (path, extra = {}) => ({ url: `${ORIGIN}${path}`, type: "main_frame", statusCode: 200, ...extra });
+  assert.equal(signInSignal(page("/"), ORIGIN), "page");
+  assert.equal(signInSignal(page("/courses/1"), ORIGIN), "page");
+  for (const path of ["/login", "/login/ldap", "/login/saml/1", "/saml/acs", "/logout"]) assert.equal(signInSignal(page(path), ORIGIN), null, path);
+  assert.equal(signInSignal(page("/", { statusCode: 302 }), ORIGIN), null);
+  assert.equal(signInSignal({ url: `${ORIGIN}/api/v1/users/self`, type: "xmlhttprequest", statusCode: 200 }, ORIGIN), "api");
+  assert.equal(signInSignal({ url: `${ORIGIN}/api/v1/users/self`, type: "xmlhttprequest", statusCode: 401 }, ORIGIN), null);
+  assert.equal(signInSignal(page("/", { url: "https://idp.ufl.edu/" }), ORIGIN), null, "other hosts never count");
+  assert.equal(signInSignal(page("/", { url: `${ORIGIN}.evil.test/` }), ORIGIN), null);
+  const headers = (value) => page("/login", { statusCode: 302, responseHeaders: [{ name: "set-cookie", value }] });
+  assert.equal(signInSignal(headers("_normandy_session=x; path=/"), ORIGIN), "set-cookie");
+  assert.equal(signInSignal(headers("_csrf_token=x\nlog_session_id=y"), ORIGIN), "set-cookie");
+  assert.equal(signInSignal(headers("_csrf_token=x"), ORIGIN), null);
+  assert.equal(signInSignal({ url: "not a url" }, ORIGIN), null);
+  assert.equal(isAuthPath("/login/canvas"), true);
+  assert.equal(isAuthPath("/courses"), false);
 });

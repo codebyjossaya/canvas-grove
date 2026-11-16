@@ -111,6 +111,9 @@
 .killSwitch:hover:not(:disabled){filter:brightness(1.1)}
 .killSwitch:focus-visible{outline:2px solid var(--focus-ring);outline-offset:2px}
 .autoForm{display:grid;gap:var(--space-2);border:0;margin:0;padding:0;min-width:0;width:100%}
+.accessChoice{display:grid;gap:var(--space-1);margin:0;padding:0;border:0;min-width:0}
+.accessChoice .checkRow{align-items:flex-start;padding:var(--space-1) 0;line-height:1.5}
+.accessChoice .checkRow input{margin-top:3px;flex:none}
 .autoLegend{padding:0;margin-bottom:4px;font-size:var(--fs-xs);font-weight:650;color:var(--text-secondary)}
 .checkRow{display:flex;align-items:center;gap:var(--space-2);min-height:36px;font-size:var(--fs-sm);cursor:pointer}
 .autoDuration{display:grid;gap:4px;font-size:var(--fs-xs);font-weight:600;color:var(--text-secondary);max-width:280px}
@@ -122,3 +125,16 @@
 .confirmInner p,.confirmInner ul{margin:0}
 .confirmInner ul{padding-left:18px;display:grid;gap:4px}
 @media (max-width:480px){.confirmInner{padding:var(--space-4)}}
+
+/* Embedded (orientation step 6): one bordered list, rows not cards. */
+.embedded{display:grid;gap:var(--space-4);min-width:0}
+.agentList{list-style:none;margin:0;padding:0;border:1px solid var(--border-subtle);border-radius:10px;background:var(--surface-raised);overflow:hidden}
+.agentList>li+li{border-top:1px solid var(--border-subtle)}
+.agentRow{display:flex;align-items:center;gap:var(--space-3);width:100%;min-height:52px;padding:var(--space-2) var(--space-4);border:0;background:none;color:var(--text-primary);text-align:left;cursor:pointer;transition:background-color var(--motion-fast) var(--ease-standard)}
+.agentRow:hover{background:var(--surface-hover)}
+.agentRow:focus-visible{outline:2px solid var(--focus-ring);outline-offset:-2px}
+.agentRow>svg{flex:none;width:16px;height:16px;color:var(--text-faint)}
+.agentText{flex:1;min-width:0;display:grid;gap:2px}
+.agentName{font-size:var(--fs-base);font-weight:500}
+.agentMeta{font-size:var(--fs-xs);color:var(--text-muted)}
+@media (prefers-reduced-motion:reduce){.agentRow{transition:none}}

@@ -30,7 +30,7 @@ export function GuideView({ agentId, serverUrl, connections, onBack, initialMode
       <button type="button" aria-pressed={mode === "oauth"} onClick={() => setMode("oauth")}>Sign in with OAuth <span>recommended</span></button>
       <button type="button" aria-pressed={mode === "token"} onClick={() => setMode("token")}>Access token</button>
     </div> : <p className={styles.muted}>{agent.auth === "oauth" ? "Signs in with OAuth: just the URL, no token to create." : "Uses a Grove access token."}</p>}
-    {tokenNeeded ? <TokenCreator agentName={agent.name} token={token} onCreate={async (name, days) => { const result = await connections.createToken(name, days); if (result.ok) setToken(result.token); return result; }} /> : null}
+    {tokenNeeded ? <TokenCreator agentName={agent.name} token={token} defaultAccess={connections.state.data?.defaults?.access} onCreate={async (name, days, allowActions) => { const result = await connections.createToken(name, days, allowActions); if (result.ok) setToken(result.token); return result; }} /> : null}
     {guide.deeplink ? <a className="button primary" href={guide.deeplink.href}>{guide.deeplink.label}<Icon name="external" /></a> : guide.noDeeplinkReason ? <p className={styles.muted}>{guide.noDeeplinkReason}</p> : null}
     <ol className={styles.steps}>{guide.steps.map((step, index) => <li key={index}>
       <span className={styles.stepText}>{step.text}</span>

@@ -10,6 +10,8 @@ import { CourseUploadError, decodeBase64Document, MCP_UPLOAD_MAX_BASE64_CHARS, M
 import { canPropose } from "./categories";
 import { StageError, stageAction, type ActionRow, type ExecResult, type Executor, type StageOutcome } from "./actions";
 import type { BearerAuth } from "./store";
+import { ScopeDisabledError } from "@/lib/scopes/settings";
+import { assertToolScope } from "@/lib/scopes/store";
 
 const WRITE = { readOnlyHint: false, openWorldHint: true, destructiveHint: false, idempotentHint: false } as const;
 export const submitAssignmentDocumentArgs = {
@@ -63,9 +65,9 @@ export function registerAssignmentDocumentTool(server: McpServer, auth: BearerAu
     inputSchema: submitAssignmentDocumentArgs, annotations: WRITE,
   }, async (args): Promise<CallToolResult> => {
     const startedAt = Date.now(); let status = "ok";
-    try { return ok(staged(await stageAssignmentDocument(auth, args, executor))); }
+    try { await assertToolScope(auth.ctx.ownerId, "submit_assignment_document"); return ok(staged(await stageAssignmentDocument(auth, args, executor))); }
     catch (error) {
-      if (error instanceof CourseUploadError || error instanceof AssignmentSubmissionInputError || error instanceof StageError) { status = error.code; return fail(error.code, error.message); }
+      if (error instanceof ScopeDisabledError || error instanceof CourseUploadError || error instanceof AssignmentSubmissionInputError || error instanceof StageError) { status = error.code; return fail(error.code, error.message); }
       status = "error"; return fail("TOOL_FAILED", "Grove could not stage this assignment document right now.");
     } finally { console.info(JSON.stringify({ event: "mcp_tool", tool: "submit_assignment_document", ownerId: auth.ctx.ownerId, status, ms: Date.now() - startedAt })); }
   });

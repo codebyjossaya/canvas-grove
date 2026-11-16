@@ -5,6 +5,7 @@ import { beginHostedOperation, finishHostedOperation } from "./postgres-operatio
 import { createHostedBrowserProvider } from "./providers";
 import { BridgeError } from "./errors";
 import type { CanvasLoginPath } from "@/lib/canvas/institution";
+import { CANVAS_CONSENT_VERSION } from "@/lib/canvas/consent-version";
 import type { DisplaySize } from "./display";
 import { CanvasSessionClient, type CanvasApiResult } from "@/lib/canvas/session-client";
 import { healthEventRow, type HealthEventRow } from "@/lib/canvas/session-health";
@@ -135,7 +136,7 @@ export const hostedSessionStore = globals.__hostedSessionStore ??= createHostedS
 export const hostedBrowserProvider = globals.__hostedBrowserProvider ??= createHostedBrowserProvider();
 // Legacy name retained for the existing session table/API contract. New connections are sourced
 // from the owner's paired browser extension; the remote login browser is no longer consented to.
-export const HOSTED_BROWSER_CONSENT_VERSION = "2026-11-14.extension-v1";
+export const HOSTED_BROWSER_CONSENT_VERSION = CANVAS_CONSENT_VERSION;
 export const INTERACTIVE_SIGN_IN_TTL_MS = 30 * 60 * 1000;
 
 export type HostedExecutionResult = { replay: boolean; ok: boolean; status: number; authRequired: boolean; data?: unknown; error?: string };

@@ -17,9 +17,9 @@ import {
   secureBrowserPopupFeatures,
 } from "@/lib/popup-window";
 import { parseInstitutionLink } from "@/lib/canvas/institution";
+import { CANVAS_CONSENT_VERSION as CONSENT_VERSION } from "@/lib/canvas/consent-version";
 import { AppLink } from "./app-link";
 
-const CONSENT_VERSION = "2026-11-14.extension-v2-auto-capture";
 const POLL_MS = 3000;
 // While the secure-browser window is open the user is mid sign-in: poll fast so
 // completion is reflected within about a second. The overall budget is unchanged.

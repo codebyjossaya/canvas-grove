@@ -15,7 +15,7 @@ function responseJson(value, status = 200) {
   return new Response(JSON.stringify(value), { status, headers: { "content-type": "application/json" } });
 }
 
-function harness({ access = true, captureStatus = 200, captureBody = { connected: true } } = {}) {
+function harness({ access = true, captureStatus = 200, captureBody = { connected: true }, selfPrefix = "" } = {}) {
   const saved = new Map([["connection", { token: TOKEN, deviceName: "Test browser", canvasOrigin: null }]]);
   const opened = [];
   const closed = [];
@@ -55,7 +55,7 @@ function harness({ access = true, captureStatus = 200, captureBody = { connected
   };
   globalThis.fetch = async (url, init = {}) => {
     const value = String(url);
-    if (value === `${ORIGIN}/api/v1/users/self`) return responseJson({ id: 42, name: "Ada Student" });
+    if (value === `${ORIGIN}/api/v1/users/self`) return new Response(selfPrefix + JSON.stringify({ id: 42, name: "Ada Student" }), { status: 200, headers: { "content-type": "application/json" } });
     if (value === `${GROVE_ORIGIN}/api/extension/canvas-auth`) {
       groveRequests.push({ url: value, init });
       return responseJson(captureBody, captureStatus);
@@ -130,4 +130,15 @@ test("extension auth clears a stale local capture attempt without reading cookie
   assert.deepEqual(result, { ok: false, reason: "auth-expired" });
   assert.equal(state.saved.has("pendingCanvasAuth"), false);
   assert.deepEqual(state.groveRequests, []);
+});
+
+test("extension recognises a Canvas sign-in when Canvas prefixes the JSON with while(1);", { concurrency: false }, async () => {
+  const state = harness({ selfPrefix: "while(1);" });
+  await import(`../extension/dist/background.js?background-auth-prefix-test=${Date.now()}`);
+  const opened = await state.send({ type: "canvas-auth-open", sessionId: SESSION_ID, canvasOrigin: ORIGIN, loginUrl: `${ORIGIN}/login` });
+  assert.equal(opened.ok, true);
+  const checked = await state.send({ type: "canvas-auth-check", sessionId: SESSION_ID, canvasOrigin: ORIGIN });
+  assert.deepEqual(checked, { ok: true, signedIn: true, account: { id: "42", name: "Ada Student" } });
+  const captured = await state.send({ type: "canvas-auth-capture", sessionId: SESSION_ID, canvasOrigin: ORIGIN });
+  assert.equal(captured.ok, true);
 });

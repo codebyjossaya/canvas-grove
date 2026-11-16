@@ -37,7 +37,10 @@ async function browserIdentity(canvasOrigin) {
   try {
     const response = await fetch(`${canvasOrigin}/api/v1/users/self`, { credentials: "include", cache: "no-store", redirect: "manual", headers: { accept: "application/json" } });
     if (response.status !== 200) return null;
-    const body = await response.json().catch(() => null);
+    // Canvas prefixes cookie-authenticated JSON with `while(1);`, which response.json() rejects.
+    const text = await response.text().catch(() => "");
+    let body = null;
+    try { body = JSON.parse(text.replace(/^while\(1\);/, "")); } catch { /* not JSON: treated as signed out */ }
     const id = typeof body?.id === "number" || typeof body?.id === "string" ? String(body.id) : "";
     if (!/^[0-9]{1,30}$/.test(id)) return null;
     const name = typeof body?.name === "string" ? body.name.trim().slice(0, 120) : "";
